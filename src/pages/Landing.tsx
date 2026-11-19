@@ -1,12 +1,15 @@
 import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { AgentNotice } from "../components/AgentNotice";
+import { BigTimer, Footer } from "../components/chrome";
 import { SiteHeader } from "../components/SiteHeader";
 import { Tank } from "../components/Tank";
-import { CountUp, RoundChip } from "../components/ui";
-import { eventStatus, roundStatus, scoreboard } from "../data/scoring";
+import { THEME_INFO, ThemeArt } from "../components/themes";
+import { CountUp } from "../components/ui";
+import { scoreboard, visibleChallenges } from "../data/scoring";
 import { useDB, useNow, useUser } from "../data/store";
-import { countdown, dateTime } from "../lib/format";
+import type { ThemeKey } from "../data/types";
 
 function useNarrow() {
   const q = "(max-width: 767px)";
@@ -16,54 +19,48 @@ function useNarrow() {
 }
 
 export default function Landing() {
-  const narrow = useNarrow();
   const db = useDB();
   const user = useUser();
-  const now = useNow();
+  const now = useNow(5000);
+  const narrow = useNarrow();
   const rows = scoreboard(db, { until: db.settings.freezeAt ? new Date(db.settings.freezeAt) : undefined }).slice(0, 3);
-  const rounds = [...db.rounds].sort((a, b) => a.order - b.order).filter((r) => r.state !== "draft");
-  const openRound = rounds.find((r) => roundStatus(r, now) === "open");
-  const ev = eventStatus(db, now);
-  const nextRound = rounds.find((r) => roundStatus(r, now) === "upcoming");
+  const live = visibleChallenges(db, now).length;
+  const themes: ThemeKey[] = ["plastics", "energy", "water", "ewaste", "food", "climate"];
 
   return (
     <div className="min-h-screen">
+      <AgentNotice />
       <section className="relative isolate overflow-hidden bg-deep text-white">
         <Tank surface={narrow ? 9 : 30} />
         <SiteHeader dark />
-        <div className="relative mx-auto grid max-w-6xl gap-12 px-5 pb-24 pt-14 sm:px-8 md:grid-cols-[1.15fr_.85fr] md:pt-24 lg:pb-32">
+        <div className="relative mx-auto grid max-w-6xl gap-12 px-5 pb-24 pt-14 sm:px-8 md:grid-cols-[1.15fr_.85fr] md:pt-24 lg:pb-28">
           <div>
             <motion.h1 initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .7, ease: [0.2, .7, .2, 1] }}
               className="max-w-xl text-[40px] font-bold leading-[1.08] sm:text-[56px]">
               {db.settings.tagline}
             </motion.h1>
             <p className="mt-6 max-w-lg text-[17px] leading-relaxed text-aqua/90">
-              {db.settings.eventName} is a one-day sustainability capture-the-flag. Your team is a startup in the tank. Every flag you capture is
-              investment from the sharks, and new challenges arrive in funding rounds.
+              {db.settings.eventName} is a three-hour sustainability capture-the-flag. Your team is a startup in the tank. Every flag you
+              capture is investment from the sharks.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               {user ? (
-                <Link to={user.role === "admin" ? "/admin" : "/play"} className="btn btn-brass">{user.role === "admin" ? "Open the Sharks' Desk" : "Go to challenges"}</Link>
+                <Link to={user.role === "admin" ? "/admin" : "/play"} className="btn btn-brass">{user.role === "admin" ? "Open the admin dashboard" : "Go to challenges"}</Link>
               ) : (
-                <Link to="/login" className="btn btn-brass">Log in with your team sheet</Link>
+                <Link to="/login" className="btn btn-brass">Log in to your team</Link>
               )}
               <Link to="/scoreboard" className="btn btn-ghost-light">See the scoreboard</Link>
             </div>
-            <p className="mt-8 text-[14px] text-aqua/80" aria-live="polite">
-              {ev === "before" && db.settings.startsAt && <>Doors open in <b className="tabular text-white">{countdown(db.settings.startsAt, now)}</b></>}
-              {ev === "live" && openRound && <><b className="text-white">{openRound.name}</b> is open{db.settings.endsAt && <> and the tank closes in <b className="tabular text-white">{countdown(db.settings.endsAt, now)}</b></>}</>}
-              {ev === "live" && !openRound && nextRound?.opensAt && <><b className="text-white">{nextRound.name}</b> opens in <b className="tabular text-white">{countdown(nextRound.opensAt, now)}</b></>}
-              {ev === "after" && <>The tank is closed. Thanks for playing.</>}
-            </p>
+            <div className="mt-10"><BigTimer /></div>
           </div>
 
           <div className="self-end md:mb-2">
             <div className="rounded-3xl border border-white/10 bg-white/[.06] p-5 backdrop-blur-sm">
               <div className="mb-3 flex items-center justify-between">
                 <h2 className="font-display text-[15px] font-semibold text-white">Top of the tank</h2>
-                {db.settings.freezeAt && <span className="text-[12px] text-brass">Frozen</span>}
+                <span className="text-[12px] text-aqua/80">{live} challenge{live === 1 ? "" : "s"} live</span>
               </div>
-              {db.settings.scoreboardVisible && rows.length > 0 ? (
+              {db.settings.scoreboardVisible && rows.some((r) => r.score > 0) ? (
                 <ol className="space-y-2">
                   {rows.map((r, i) => (
                     <li key={r.teamId} className="flex items-center gap-3 rounded-2xl bg-deep/60 px-4 py-3">
@@ -84,12 +81,12 @@ export default function Landing() {
 
       <main className="mx-auto max-w-6xl px-5 sm:px-8">
         <section className="grid gap-10 py-20 md:grid-cols-[.8fr_1.2fr]">
-          <h2 className="text-[28px] font-bold leading-tight">How a round works</h2>
+          <h2 className="text-[28px] font-bold leading-tight">How it works</h2>
           <ol className="grid gap-8 sm:grid-cols-3">
             {[
-              ["Log in as your startup", "Every member has their own login. Your points add up to your team's valuation."],
-              ["Crack the round", "Each funding round releases a new wave of challenges. Find the flag, submit it, bank the points."],
-              ["Climb the tank", "Higher valuation ranks higher. Level on points? The team that got there first wins the tie."],
+              ["Log in as yourself", "Your team has three members, each with their own login. Every flag any of you captures counts for the team."],
+              ["Crack the challenges", "Organisers post challenges in waves of five, plus single surprise challenges. Watch the notifications."],
+              ["Beat the clock", "You have three hours. Highest valuation wins. Level on points? The team that got there first ranks higher."],
             ].map(([t, d], i) => (
               <li key={t}>
                 <span className="font-display text-[40px] font-bold leading-none text-kelp-300">{i + 1}</span>
@@ -102,28 +99,17 @@ export default function Landing() {
 
         <section className="grid gap-10 border-t border-fin-200/70 py-20 md:grid-cols-[.8fr_1.2fr]">
           <div>
-            <h2 className="text-[28px] font-bold leading-tight">Funding rounds</h2>
-            <p className="mt-3 max-w-xs text-[15px] text-deep/70">Rounds open on a schedule. Challenges from earlier rounds stay open until their round closes.</p>
+            <h2 className="text-[28px] font-bold leading-tight">The waste trail</h2>
+            <p className="mt-3 max-w-xs text-[15px] text-deep/70">Every challenge follows a real sustainability problem on a fictional campus.</p>
           </div>
-          {rounds.length ? (
-            <ul className="divide-y divide-fin-200/70 border-y border-fin-200/70">
-              {rounds.map((r) => {
-                const st = roundStatus(r, now);
-                const count = db.challenges.filter((c) => c.roundId === r.id && !c.hidden).length;
-                return (
-                  <li key={r.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-4">
-                    <span className="min-w-[10rem] font-display text-[17px] font-semibold">{r.name}</span>
-                    <RoundChip status={st} />
-                    <span className="text-[14px] text-deep/70">
-                      {st === "upcoming" && `Opens ${dateTime(r.opensAt)}`}
-                      {st === "open" && `${count} challenge${count === 1 ? "" : "s"} live`}
-                      {st === "closed" && "No longer accepting flags"}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          ) : <p className="text-deep/70">The first round will appear here when the organisers schedule it.</p>}
+          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {themes.map((k) => (
+              <li key={k} className="flex items-start gap-3 rounded-2xl p-4" style={{ background: THEME_INFO[k].tint }}>
+                <ThemeArt theme={k} size={40} />
+                <span><b className="block text-[15px]" style={{ color: THEME_INFO[k].ink }}>{THEME_INFO[k].label}</b><span className="text-[13.5px] text-deep/75">{THEME_INFO[k].fact}</span></span>
+              </li>
+            ))}
+          </ul>
         </section>
 
         <section className="grid gap-10 border-t border-fin-200/70 py-20 md:grid-cols-[.8fr_1.2fr]">
@@ -142,17 +128,12 @@ export default function Landing() {
           <h2 className="text-[28px] font-bold leading-tight">Play fair</h2>
           <ul className="space-y-4 text-[15.5px]">
             <li><b>Use AI to learn, not to solve.</b> Ask it how SQL joins work, not for the answer. Every team must be able to explain how it got each flag.</li>
-            <li><b>Keep flags inside your team.</b> Shared flags show up in the organisers' logs.</li>
+            <li><b>Keep flags inside your team.</b> Shared answers show up in the organisers' logs.</li>
             <li><b>Guess slowly.</b> Rapid-fire guessing is rate-limited. Read the challenge again instead.</li>
           </ul>
         </section>
       </main>
-      <footer className="border-t border-fin-200/70">
-        <div className="mx-auto flex max-w-6xl flex-wrap justify-between gap-2 px-5 py-8 text-[13px] text-fin sm:px-8">
-          <span>{db.settings.eventName}, a sustainability capture-the-flag. Companies and people in the challenges are fictional.</span>
-          <span>Organised by the EcoCypher team</span>
-        </div>
-      </footer>
+      <Footer />
     </div>
   );
 }

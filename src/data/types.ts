@@ -28,15 +28,14 @@ export interface ChallengeType {
   description: string;
 }
 
-/** A funding round = a wave of challenges released together. */
-export type RoundState = "draft" | "scheduled" | "closed";
-export interface Round {
+/** Sustainability theme shown on a challenge card. */
+export type ThemeKey = "plastics" | "energy" | "water" | "ewaste" | "food" | "climate";
+
+/** A batch of five challenges posted together. Single challenges have no wave. */
+export interface Wave {
   id: string;
-  name: string;
-  order: number;
-  state: RoundState;
-  opensAt: string | null;
-  closesAt: string | null;
+  number: number;
+  createdAt: string;
 }
 
 export interface ChallengeFile {
@@ -46,8 +45,9 @@ export interface ChallengeFile {
 
 export interface Challenge {
   id: string;
-  roundId: string;
+  waveId: string | null;
   typeId: string;
+  theme: ThemeKey;
   title: string;
   description: string;
   points: number;
@@ -57,6 +57,8 @@ export interface Challenge {
   files: ChallengeFile[];
   hint: string;
   hidden: boolean;
+  /** null = draft (never shown to players). Players see it from this moment. */
+  releaseAt: string | null;
   createdAt: string;
 }
 
@@ -70,17 +72,23 @@ export interface Submission {
   at: string;
 }
 
-export interface Announcement {
+export type NoticeLevel = "info" | "important";
+export interface Notification {
   id: string;
-  text: string;
+  title: string;
+  body: string;
+  level: NoticeLevel;
   at: string;
 }
 
 export interface Settings {
   eventName: string;
   tagline: string;
+  /** Set when the admin starts the timer. */
   startsAt: string | null;
   endsAt: string | null;
+  durationMinutes: number;
+  teamSize: number;
   scoreboardVisible: boolean;
   /** When set, the public scoreboard shows standings as of this moment. */
   freezeAt: string | null;
@@ -88,19 +96,19 @@ export interface Settings {
 }
 
 export interface DB {
-  version: 1;
+  version: 2;
   settings: Settings;
   users: User[];
   teams: Team[];
   types: ChallengeType[];
-  rounds: Round[];
+  waves: Wave[];
   challenges: Challenge[];
   submissions: Submission[];
-  announcements: Announcement[];
+  notifications: Notification[];
   demo: boolean;
 }
 
-export type RoundStatus = "draft" | "upcoming" | "open" | "closed";
+export type ReleaseStatus = "draft" | "scheduled" | "live";
 
 export interface MemberScore {
   userId: string;

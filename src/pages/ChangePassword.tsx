@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { Logo } from "../components/ui";
+import { Footer } from "../components/chrome";
 import { useBackend, useUser } from "../data/store";
 
 export default function ChangePassword() {
@@ -24,7 +25,8 @@ export default function ChangePassword() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center px-6">
+    <div className="flex min-h-screen flex-col">
+    <div className="flex flex-1 flex-col items-center justify-center px-6 py-12">
       <Logo />
       <form onSubmit={submit} className="panel mt-8 w-full max-w-sm space-y-4 p-7">
         <h1 className="text-xl font-bold">Choose your own password</h1>
@@ -35,6 +37,8 @@ export default function ChangePassword() {
         {error && <p role="alert" className="rounded-xl bg-coral-100 px-3.5 py-2.5 text-[14px] text-coral">{error}</p>}
         <button className="btn btn-kelp w-full">Save password</button>
       </form>
+    </div>
+    <Footer />
     </div>
   );
 }

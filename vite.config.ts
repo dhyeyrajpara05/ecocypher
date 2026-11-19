@@ -1,9 +1,30 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+
+// Content Security Policy for the built site: scripts only from this site, no inline scripts,
+// no connections to other servers. Added at build time only (the dev server needs inline scripts).
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "font-src 'self' data:",
+  "img-src 'self' data: https:",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join("; ");
+
+const csp = (): Plugin => ({
+  name: "csp",
+  apply: "build",
+  transformIndexHtml: (html) => html.replace("<meta charset=\"UTF-8\" />", `<meta charset="UTF-8" />\n    <meta http-equiv="Content-Security-Policy" content="${CSP}" />`),
+});
 
 // GitHub Pages serves the site from /ecocypher/. On Vercel set BASE_PATH=/ .
 export default defineConfig({
   base: process.env.BASE_PATH ?? "/ecocypher/",
-  plugins: [react()],
+  plugins: [react(), csp()],
+  build: { sourcemap: false },
   test: { environment: "node" },
 } as any);

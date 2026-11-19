@@ -29,7 +29,7 @@ export default function Teams() {
   const db = useDB();
   const toast = useToast();
   const [name, setName] = useState("");
-  const [members, setMembers] = useState("");
+  const [members, setMembers] = useState<string[]>([]);
   const [creds, setCreds] = useState<Credential[] | null>(null);
   const [csvOpen, setCsvOpen] = useState(false);
   const [csv, setCsv] = useState("");
@@ -39,20 +39,30 @@ export default function Teams() {
   async function create(e: React.FormEvent) {
     e.preventDefault();
     try {
-      const c = await be.createTeam(name, members.split("\n"));
-      setCreds(c); setName(""); setMembers("");
+      const c = await be.createTeam(name, members);
+      setCreds(c); setName(""); setMembers([]);
     } catch (err) { toast((err as Error).message, "bad"); }
   }
 
   return (
     <div>
       <PageHead title="Teams & members" actions={<button className="btn btn-line" onClick={() => setCsvOpen(true)}>Import teams from CSV</button>}>
-        Every member gets their own login. Points they score count towards their team.
+        Register each team with its members. Members log in by picking their team and their name.
       </PageHead>
-      <form onSubmit={create} className="panel mb-8 grid gap-4 p-5 sm:grid-cols-[1fr_1.4fr_auto] sm:items-end">
-        <div><label className="label" htmlFor="tn">Team name</label><input id="tn" className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Kelp Capital" required /></div>
-        <div><label className="label" htmlFor="tm">Members, one per line</label><textarea id="tm" className="field h-[88px]" value={members} onChange={(e) => setMembers(e.target.value)} placeholder={"Aarav Shah\nMeera Iyer\nKabir Rao"} required /></div>
-        <button className="btn btn-kelp">Create team</button>
+      <form onSubmit={create} className="panel mb-8 p-5">
+        <h2 className="text-[17px] font-semibold">Register a team</h2>
+        <p className="mt-1 text-[14px] text-deep/70">Each team has up to {db.settings.teamSize} members. Every member gets their own login and plays for the team.</p>
+        <div className="mt-4 grid gap-4 md:grid-cols-[1fr_2fr]">
+          <div><label className="label" htmlFor="tn">Team name</label><input id="tn" className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Kelp Capital" required /></div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {Array.from({ length: db.settings.teamSize }).map((_, i) => (
+              <div key={i}><label className="label" htmlFor={`m${i}`}>Member {i + 1}</label>
+                <input id={`m${i}`} className="field" value={members[i] ?? ""} placeholder="Full name" required={i === 0}
+                  onChange={(e) => setMembers((m) => { const x = [...m]; x[i] = e.target.value; return x; })} /></div>
+            ))}
+          </div>
+        </div>
+        <button className="btn btn-kelp mt-4">Register team</button>
       </form>
 
       {db.teams.length === 0 ? <Empty title="No teams yet">Create a team above, or import them all from a CSV.</Empty> : (

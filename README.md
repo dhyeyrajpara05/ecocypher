@@ -1,87 +1,79 @@
 # EcoCypher
 
-A sustainability capture-the-flag with a Shark Tank twist. Teams are startups in the tank, every flag
-they capture is investment from the sharks, and challenges are released in **funding rounds** (waves).
+A three-hour sustainability capture-the-flag with a Shark Tank twist. Teams are startups in the tank, and
+every flag they capture is investment from the sharks.
 
-- **Players**: each member has their own login, sees the open rounds, submits flags, and adds points to the team.
-- **Scoreboard**: teams ranked by points. On equal points, the team that reached that score **first** ranks higher.
-  Each team's row expands to show every member's contribution. Admins can hide or freeze it.
-- **Sharks' Desk (admin)**: live monitor, funding rounds with scheduled or manual release, bulk "upload a wave"
-  from CSV/JSON, challenge editor, four renameable challenge types, teams and member logins (with CSV import and
-  printable credentials), submission log with shared-answer flags, announcements, settings and backups.
+Created by **DEAKIN RESEARCH & TECHNOLOGY CLUB**.
+
+## Features
+
+- **Team login**: each team is registered with its members (3 by default). A member picks their team, then their
+  own name, then types their own password. Every point they score goes to the team.
+- **3-hour clock**: started by the admin at kickoff and shown on every page. Submissions close when it hits zero.
+- **Challenges in two formats**: post a **wave of 5** challenges together, or a **single challenge** on its own.
+  Each can go live now, be scheduled, or be saved as a draft.
+- **Sustainability-themed cards**: every challenge carries a theme (plastics, energy, water, e-waste, food waste,
+  climate) with its own illustration, colour and fact.
+- **Notifications page**: the admin posts updates; players get a pop-up and an unread badge.
+- **Scoreboard**: teams ranked by points; on equal points, the team that got there first ranks higher. Expand a
+  team to see each member's points. Admins can hide or freeze it.
+- **Admin dashboard**: clock controls, live numbers, solves over time and by type, live feed, leaderboard, what's
+  coming up next, challenge health, posting forms, challenge library, teams, notifications, submissions, settings.
 
 Built with React, TypeScript, Vite, Tailwind CSS and Framer Motion.
 
 ## Try it
 
-Live demo: **https://dhyeyrajpara05.github.io/ecocypher/**
+Live: **https://dhyeyrajpara05.github.io/ecocypher/**
 
-The demo opens with sample data:
+The demo opens with sample teams. Team members' password: `dive-in-2026`. Organiser: `admin` / `EcoCypher@2026`
+(you'll be asked to change it). Demo flags are not published; ask the organisers.
 
-| Role | Username | Password |
-| --- | --- | --- |
-| Admin | `admin` | `EcoCypher@2026` (you'll be asked to change it) |
-| Player | `kelp-capital-1` (also `reef-ventures-2`, `driftwood-co-3`, ...) | `dive-in-2026` |
+## Security
 
-Demo flags for testing: `ECO{straw-1840}`, `ECO{42676160}`, `ECO{bins-on-tuesday}`, `ECO{pump-3_18}`, `ECO{2029}`.
+- **Flags are never stored or shipped as text.** Each flag is stored only as a salted PBKDF2-SHA256 hash
+  (150,000 iterations). The site checks a guess by hashing it, so neither the code, the repo nor the browser's data
+  contains the answers. Correct submissions are logged as "(correct flag)", never as typed.
+- **Passwords** are salted PBKDF2 hashes too.
+- **Stored data is encrypted** with AES-256-GCM. The key is created in the browser as a non-extractable Web Crypto
+  key, so DevTools shows only ciphertext and the key can't be copied out.
+- **Unreleased challenges are never shown**: drafts and scheduled challenges don't render for players.
+- **Content Security Policy** in the built site blocks inline and third-party scripts. GitHub Pages serves over HTTPS.
+- **Notice to AI agents**: every page carries a notice asking AI tools not to help solve the challenges. It is in the
+  HTML comments, a meta tag, `/llms.txt`, and in the page text clipped to an invisible 1x1 pixel and hidden from
+  screen readers. People browsing never see it.
 
-## Important: GitHub Pages mode is for demos and dry runs
-
-GitHub Pages only serves static files, so this version keeps all data in **each browser's localStorage**:
-
-- Every browser has its own copy. Teams on different laptops will **not** see each other's scores.
-- Passwords and flags are hashed, but a technical player could still read or edit their own browser's data.
-
-That's fine for showing the site, rehearsing the admin flow and testing challenges. For the real event, deploy
-to Vercel with a server backend: see [docs/VERCEL.md](docs/VERCEL.md). The UI only talks to the `Backend`
-interface in `src/data/backend.ts`, so moving to a server means writing one new class, not changing pages.
+**Limits of the GitHub Pages version.** It has no server, so all data lives in each browser, and teams on different
+laptops won't see each other's scores. Challenge text that an admin types in their browser stays in their browser,
+but any page code can be inspected by a determined person, and the AI notice is a request that well-behaved tools
+follow, not a lock. For the real event, deploy the server version on Vercel: see [docs/VERCEL.md](docs/VERCEL.md).
 
 ## Run locally
 
 ```bash
 npm install
 npm run dev      # http://localhost:5173/ecocypher/
-npm test         # 17 unit tests: scoring, tie-breaks, flags, waves, permissions
-npm run build    # production build in dist/
+npm test         # 20 unit tests: scoring, tie-breaks, team login, flags, waves, timer, encryption
+npm run build
 ```
 
 ## Setting up a real event (admin)
 
-1. Log in as `admin` and go to **Settings > Clear everything and start fresh**. Save the new admin login it shows.
-2. **Challenge types**: rename the four types and pick colours.
-3. **Funding rounds**: create your rounds (e.g. Seed round, Series A, Series B, The final pitch).
-4. **Upload a wave** into each round from a CSV or JSON file (download the template from the upload dialog), or
-   add challenges one by one under **Challenges**.
-5. **Teams & members**: create teams or import a CSV (`team,member1,member2,member3`). Download or print the
-   logins; temporary passwords are shown only once.
-6. **Settings**: set start and end times. On the day, open or schedule rounds from **Funding rounds** and watch
-   the **Live monitor**.
+1. Log in as the organiser and go to **Settings > Clear everything and start fresh**. Save the new admin login.
+2. **Settings**: rename the four challenge types, set members per team (default 3) and the clock length (default 180).
+3. **Teams & members**: register each team with its members, or import a CSV (`team,member1,member2,member3`).
+   Download or print the logins; temporary passwords are shown once.
+4. **Post challenges**: build a wave of 5 (or load it from the CSV template), or post single challenges. Schedule
+   them or keep them as drafts.
+5. On the day, press **Start the 3-hour clock** on the dashboard. Release waves from the **Challenge library** and
+   send updates from **Notifications**.
 
-### Wave upload format
+### CSV format for challenges
 
 ```csv
-title,type,points,flag,description,hint,files
-"Bin Day",OSINT,100,ECO{example},"Which photo was taken at the dock?","Check the metadata",photos.zip|files/photos.zip
+title,type,theme,points,flag,description,hint,files
+"Bin Day",OSINT,plastics,100,ECO{...},"Which photo was taken at the dock?","Check the metadata",photos.zip|files/photos.zip
 ```
 
-`type` is one of your four type names. `files` is `name|url;name|url`. Put challenge files in `public/files/`
-and link them as `files/<name>`. JSON: an array of objects with the same keys.
-
-## Scoring
-
-- Each challenge has its own points, awarded once per team, credited to the member who submitted the flag.
-- Team score = sum of its solves. Ties go to the team whose last scoring solve came earlier.
-- Wrong flags cost nothing, but attempts are rate-limited (default 10 per member per minute).
-
-## Project layout
-
-```
-src/data/types.ts        data model
-src/data/scoring.ts      scoring, ranking, round status (pure functions, unit-tested)
-src/data/backend.ts      Backend interface + LocalBackend (browser storage)
-src/data/seed.ts         demo data
-src/pages/               Landing, Login, Play, Scoreboard
-src/pages/admin/         Sharks' Desk
-src/components/Tank.tsx  the animated tank in the hero
-.github/workflows/       GitHub Pages deployment
-```
+`type` is one of your four type names; `theme` is plastics, energy, water, ewaste, food or climate; `files` is
+`name|url;name|url`. Put challenge files in `public/files/` and link them as `files/<name>`.

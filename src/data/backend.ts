@@ -1,24 +1,23 @@
 /**
  * Backend for EcoCypher.
  *
- * LocalBackend keeps everything in the browser's localStorage. That makes the GitHub Pages
- * build fully interactive with no server, but each browser has its OWN copy of the data and
- * a determined player could read or edit it. Use it for demos and dry runs only.
- *
- * For the real event (Vercel), implement the same `Backend` interface with server API calls
- * (see docs/VERCEL.md). The UI only talks to this interface, so nothing else needs to change.
+ * LocalBackend keeps everything in the browser (encrypted, see vault.ts). That makes the GitHub Pages
+ * build fully interactive with no server, but each browser has its OWN copy of the data. Use it for
+ * demos and dry runs. For the real event implement the same `Backend` interface against a server
+ * (see docs/VERCEL.md). The UI only talks to this interface.
  */
-import { hashFlag, hashPassword, randomId, randomSalt, tempPassword } from "./crypto";
-import { demoDB, freshDB, makeChallenge, makeUser } from "./seed";
-import { eventStatus, roundStatus, solves } from "./scoring";
-import type { Challenge, ChallengeType, DB, Round, Settings, SubmitResult, Team, User } from "./types";
+import { hashFlag, hashPassword, randomId, randomSalt, sameHash, tempPassword } from "./crypto";
+import { demoDB, freshDB, makeUser } from "./seed";
+import { eventStatus, releaseStatus, solves, WAVE_SIZE } from "./scoring";
+import type { Challenge, ChallengeType, DB, NoticeLevel, Settings, SubmitResult, Team, ThemeKey, User } from "./types";
+import { plainCipher, type Cipher } from "./vault";
 
 export interface Credential { team: string; displayName: string; username: string; password: string }
 export interface ChallengeInput {
-  roundId: string; typeId: string; title: string; description: string; points: number;
+  typeId: string; theme: ThemeKey; title: string; description: string; points: number;
   flag?: string; caseSensitive: boolean; files: { name: string; url: string }[]; hint: string; hidden: boolean;
 }
-export interface ImportReport { added: number; errors: string[] }
+export interface ParsedFile { items: ChallengeInput[]; errors: string[] }
 
 export interface Backend {
   ready(): Promise<void>;
@@ -26,18 +25,24 @@ export interface Backend {
   subscribe(fn: () => void): () => void;
   currentUser(): User | null;
   login(username: string, password: string): Promise<User>;
+  loginMember(teamId: string, userId: string, password: string): Promise<User>;
   logout(): void;
   changePassword(current: string, next: string): Promise<void>;
   submitFlag(challengeId: string, value: string): Promise<SubmitResult>;
-  // admin
+  // admin: event
   updateSettings(patch: Partial<Settings>): void;
+  startTimer(): void;
+  extendTimer(minutes: number): void;
+  endEventNow(): void;
+  resetTimer(): void;
   updateType(id: string, patch: Partial<ChallengeType>): void;
-  createRound(name: string): Round;
-  updateRound(id: string, patch: Partial<Round>): void;
-  deleteRound(id: string): void;
-  saveChallenge(id: string | null, input: ChallengeInput): Promise<Challenge>;
+  // admin: challenges
+  postWave(items: ChallengeInput[], releaseAt: string | null): Promise<Challenge[]>;
+  saveChallenge(id: string | null, input: ChallengeInput, releaseAt?: string | null): Promise<Challenge>;
+  setRelease(id: string, releaseAt: string | null): void;
   deleteChallenge(id: string): void;
-  importChallenges(roundId: string, text: string): Promise<ImportReport>;
+  parseChallengeFile(text: string): ParsedFile;
+  // admin: people
   createTeam(name: string, members: string[]): Promise<Credential[]>;
   importTeams(csv: string): Promise<{ credentials: Credential[]; errors: string[] }>;
   renameTeam(id: string, name: string): void;
@@ -45,16 +50,18 @@ export interface Backend {
   addMember(teamId: string, displayName: string): Promise<Credential>;
   resetPassword(userId: string): Promise<Credential>;
   deleteUser(userId: string): void;
-  postAnnouncement(text: string): void;
-  deleteAnnouncement(id: string): void;
+  // admin: notifications and data
+  postNotification(title: string, body: string, level: NoticeLevel): void;
+  deleteNotification(id: string): void;
   exportJSON(): string;
   importJSON(text: string): void;
   startFresh(): Promise<Credential>;
   loadDemo(): Promise<void>;
 }
 
-const KEY = "ecocypher:v1";
+const KEY = "ecocypher:data";
 const SESSION = "ecocypher:session";
+export const THEMES: ThemeKey[] = ["plastics", "energy", "water", "ewaste", "food", "climate"];
 
 export class BackendError extends Error {}
 
@@ -90,33 +97,48 @@ export class LocalBackend implements Backend {
   private state!: DB;
   private listeners = new Set<() => void>();
   private loading: Promise<void>;
-  private storage: Storage;
+  private writing: Promise<void> = Promise.resolve();
+  private cipher!: Cipher;
 
-  constructor(storage: Storage = window.localStorage) {
-    this.storage = storage;
-    this.loading = this.load();
-    if (typeof window !== "undefined") {
-      window.addEventListener("storage", (e) => {
-        if (e.key === KEY && e.newValue) { this.state = JSON.parse(e.newValue); this.emit(); }
-        if (e.key === SESSION) this.emit();
-      });
-    }
+  constructor(private storage: Storage = window.localStorage, cipher: Cipher | Promise<Cipher> = plainCipher) {
+    this.loading = this.load(cipher);
   }
 
-  private async load() {
+  private async load(cipherP: Cipher | Promise<Cipher>) {
+    this.cipher = await cipherP;
     const raw = this.storage.getItem(KEY);
     if (raw) {
-      try { this.state = JSON.parse(raw); return; } catch { /* fall through to demo */ }
+      try {
+        const d = JSON.parse(await this.cipher.open(raw));
+        if (d?.version === 2) { this.state = d; this.listen(); return; }
+      } catch { /* unreadable (e.g. key cleared): start over with demo data */ }
     }
+    this.storage.removeItem("ecocypher:v1"); // data from the first version
     this.state = await demoDB();
     this.persist();
+    this.listen();
+  }
+
+  private listen() {
+    if (typeof window === "undefined") return;
+    window.addEventListener("storage", async (e) => {
+      if (e.key === KEY && e.newValue) {
+        try { this.state = JSON.parse(await this.cipher.open(e.newValue)); this.emit(); } catch { /* ignore */ }
+      }
+      if (e.key === SESSION) this.emit();
+    });
   }
 
   ready() { return this.loading; }
+  /** Resolves when the latest change has been encrypted and saved. */
+  flushed() { return this.writing; }
   db() { return this.state; }
   subscribe(fn: () => void) { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; }
   private emit() { this.listeners.forEach((f) => f()); }
-  private persist() { this.storage.setItem(KEY, JSON.stringify(this.state)); }
+  private persist() {
+    const snapshot = JSON.stringify(this.state);
+    this.writing = this.writing.then(async () => this.storage.setItem(KEY, await this.cipher.seal(snapshot)));
+  }
   private commit(mut: (d: DB) => void) {
     const next = structuredClone(this.state);
     mut(next);
@@ -140,20 +162,25 @@ export class LocalBackend implements Backend {
     return u;
   }
 
-  async login(username: string, password: string) {
-    const u = this.state.users.find((x) => x.username.toLowerCase() === username.trim().toLowerCase());
-    if (!u || (await hashPassword(password, u.passwordSalt)) !== u.passwordHash) {
-      throw new BackendError("That username and password don't match. Check your team sheet.");
-    }
+  private async checkPassword(u: User | undefined, password: string, msg: string) {
+    if (!u || !sameHash(await hashPassword(password, u.passwordSalt), u.passwordHash)) throw new BackendError(msg);
     this.storage.setItem(SESSION, u.id);
     this.emit();
     return u;
+  }
+  login(username: string, password: string) {
+    const u = this.state.users.find((x) => x.username.toLowerCase() === username.trim().toLowerCase());
+    return this.checkPassword(u, password, "That username and password don't match.");
+  }
+  loginMember(teamId: string, userId: string, password: string) {
+    const u = this.state.users.find((x) => x.id === userId && x.teamId === teamId && x.role === "player");
+    return this.checkPassword(u, password, "That password isn't right for this member. Check your team sheet.");
   }
   logout() { this.storage.removeItem(SESSION); this.emit(); }
 
   async changePassword(current: string, next: string) {
     const u = this.requireUser();
-    if ((await hashPassword(current, u.passwordSalt)) !== u.passwordHash) throw new BackendError("Your current password is not right.");
+    if (!sameHash(await hashPassword(current, u.passwordSalt), u.passwordHash)) throw new BackendError("Your current password is not right.");
     if (next.length < 8) throw new BackendError("Use at least 8 characters.");
     const salt = randomSalt();
     const hash = await hashPassword(next, salt);
@@ -165,120 +192,144 @@ export class LocalBackend implements Backend {
     if (u.role !== "player" || !u.teamId) return { ok: false, correct: false, message: "Only team members can submit flags." };
     const d = this.state;
     const ev = eventStatus(d);
-    if (ev === "before") return { ok: false, correct: false, message: "The event hasn't started yet." };
-    if (ev === "after") return { ok: false, correct: false, message: "The event has ended. Submissions are closed." };
+    if (ev === "not-started") return { ok: false, correct: false, message: "The timer hasn't started yet." };
+    if (ev === "ended") return { ok: false, correct: false, message: "Time's up. Submissions are closed." };
     const c = d.challenges.find((x) => x.id === challengeId);
-    const round = c && d.rounds.find((r) => r.id === c.roundId);
-    if (!c || !round || c.hidden) return { ok: false, correct: false, message: "That challenge isn't available." };
-    const rs = roundStatus(round);
-    if (rs !== "open") return { ok: false, correct: false, message: rs === "closed" ? `${round.name} has closed. This challenge no longer accepts flags.` : `${round.name} hasn't opened yet.` };
+    if (!c || c.hidden || releaseStatus(c) !== "live") return { ok: false, correct: false, message: "That challenge isn't available." };
     if (solves(d).some((s) => s.teamId === u.teamId && s.challengeId === c.id)) {
       return { ok: true, correct: true, alreadySolved: true, message: "Your team already solved this one." };
     }
     if (!value.trim()) return { ok: false, correct: false, message: "Type a flag first." };
     const since = Date.now() - 60_000;
-    const recent = d.submissions.filter((s) => s.userId === u.id && Date.parse(s.at) > since).length;
-    if (recent >= d.settings.submissionsPerMinute) return { ok: false, correct: false, message: "Too many attempts. Wait a minute and try again." };
-    const correct = (await hashFlag(value, c.flagSalt, c.caseSensitive)) === c.flagHash;
-    this.commit((x) => x.submissions.push({ id: randomId("s-"), userId: u.id, teamId: u.teamId!, challengeId: c.id, value: value.trim().slice(0, 200), correct, at: new Date().toISOString() }));
+    if (d.submissions.filter((s) => s.userId === u.id && Date.parse(s.at) > since).length >= d.settings.submissionsPerMinute) {
+      return { ok: false, correct: false, message: "Too many attempts. Wait a minute and try again." };
+    }
+    const correct = sameHash(await hashFlag(value, c.flagSalt, c.caseSensitive), c.flagHash);
+    // Wrong guesses are kept for the review log; correct flags are never stored as typed.
+    this.commit((x) => x.submissions.push({ id: randomId("s-"), userId: u.id, teamId: u.teamId!, challengeId: c.id, value: correct ? "(correct flag)" : value.trim().slice(0, 200), correct, at: new Date().toISOString() }));
     return correct
       ? { ok: true, correct: true, points: c.points, message: `Deal! The sharks invested ${c.points} points in your team.` }
       : { ok: true, correct: false, message: "Not quite. That flag isn't right." };
   }
 
-  // ---------------------------------------------------------------- admin
+  // ---------------------------------------------------------------- admin: event
   updateSettings(patch: Partial<Settings>) { this.requireAdmin(); this.commit((d) => { d.settings = { ...d.settings, ...patch }; }); }
+  startTimer() {
+    this.requireAdmin();
+    const now = Date.now();
+    this.commit((d) => { d.settings.startsAt = new Date(now).toISOString(); d.settings.endsAt = new Date(now + d.settings.durationMinutes * 60_000).toISOString(); });
+  }
+  extendTimer(minutes: number) {
+    this.requireAdmin();
+    if (!this.state.settings.endsAt) throw new BackendError("Start the timer first.");
+    this.commit((d) => { d.settings.endsAt = new Date(Date.parse(d.settings.endsAt!) + minutes * 60_000).toISOString(); });
+  }
+  endEventNow() { this.requireAdmin(); this.commit((d) => { d.settings.endsAt = new Date().toISOString(); }); }
+  resetTimer() { this.requireAdmin(); this.commit((d) => { d.settings.startsAt = null; d.settings.endsAt = null; }); }
   updateType(id: string, patch: Partial<ChallengeType>) {
     this.requireAdmin();
     this.commit((d) => { const t = d.types.find((x) => x.id === id); if (t) Object.assign(t, patch, { id }); });
   }
-  createRound(name: string) {
-    this.requireAdmin();
-    const r: Round = { id: randomId("r-"), name: name.trim() || "New round", order: (Math.max(0, ...this.state.rounds.map((x) => x.order)) + 1), state: "draft", opensAt: null, closesAt: null };
-    this.commit((d) => d.rounds.push(r));
-    return r;
-  }
-  updateRound(id: string, patch: Partial<Round>) {
-    this.requireAdmin();
-    this.commit((d) => { const r = d.rounds.find((x) => x.id === id); if (r) Object.assign(r, patch, { id }); });
-  }
-  deleteRound(id: string) {
-    this.requireAdmin();
-    if (this.state.challenges.some((c) => c.roundId === id)) throw new BackendError("Move or delete this round's challenges first.");
-    this.commit((d) => { d.rounds = d.rounds.filter((r) => r.id !== id); });
+
+  // ---------------------------------------------------------------- admin: challenges
+  private validate(input: ChallengeInput, needFlag: boolean, label = "") {
+    const p = label ? `${label}: ` : "";
+    if (!input.title.trim()) throw new BackendError(`${p}give the challenge a title.`);
+    if (!(input.points > 0)) throw new BackendError(`${p}points must be more than 0.`);
+    if (needFlag && !input.flag?.trim()) throw new BackendError(`${p}add a flag.`);
+    if (!this.state.types.some((t) => t.id === input.typeId)) throw new BackendError(`${p}pick a challenge type.`);
   }
 
-  async saveChallenge(id: string | null, input: ChallengeInput) {
-    this.requireAdmin();
-    if (!input.title.trim()) throw new BackendError("Give the challenge a title.");
-    if (!(input.points > 0)) throw new BackendError("Points must be more than 0.");
-    const existing = id ? this.state.challenges.find((c) => c.id === id) : undefined;
-    if (!existing && !input.flag?.trim()) throw new BackendError("A new challenge needs a flag.");
+  private async build(input: ChallengeInput, existing: Challenge | undefined, waveId: string | null, releaseAt: string | null): Promise<Challenge> {
     let flagSalt = existing?.flagSalt ?? randomSalt();
     let flagHash = existing?.flagHash ?? "";
     if (input.flag?.trim()) { flagSalt = randomSalt(); flagHash = await hashFlag(input.flag, flagSalt, input.caseSensitive); }
-    else if (existing && existing.caseSensitive !== input.caseSensitive) {
-      throw new BackendError("Re-enter the flag when you change case sensitivity.");
-    }
-    const { flag: _f, ...rest } = input;
-    const c: Challenge = { id: id ?? randomId("c-"), createdAt: existing?.createdAt ?? new Date().toISOString(), ...rest, title: rest.title.trim(), flagSalt, flagHash };
+    else if (existing && existing.caseSensitive !== input.caseSensitive) throw new BackendError("Re-enter the flag when you change case sensitivity.");
+    const { flag: _omit, ...rest } = input;
+    return { id: existing?.id ?? randomId("c-"), createdAt: existing?.createdAt ?? new Date().toISOString(), ...rest,
+      title: rest.title.trim(), files: rest.files.filter((f) => f.name.trim() && f.url.trim()), waveId, releaseAt, flagSalt, flagHash };
+  }
+
+  /** Posts exactly five challenges together as the next wave. */
+  async postWave(items: ChallengeInput[], releaseAt: string | null) {
+    this.requireAdmin();
+    if (items.length !== WAVE_SIZE) throw new BackendError(`A wave has exactly ${WAVE_SIZE} challenges. You have ${items.length}.`);
+    items.forEach((it, i) => this.validate(it, true, `Challenge ${i + 1}`));
+    const wave = { id: randomId("w-"), number: Math.max(0, ...this.state.waves.map((w) => w.number)) + 1, createdAt: new Date().toISOString() };
+    const built = await Promise.all(items.map((it) => this.build(it, undefined, wave.id, releaseAt)));
+    this.commit((d) => { d.waves.push(wave); d.challenges.push(...built); });
+    return built;
+  }
+
+  /** Creates a single challenge (id = null) or edits any challenge, keeping its wave. */
+  async saveChallenge(id: string | null, input: ChallengeInput, releaseAt?: string | null) {
+    this.requireAdmin();
+    const existing = id ? this.state.challenges.find((c) => c.id === id) : undefined;
+    if (id && !existing) throw new BackendError("That challenge no longer exists.");
+    this.validate(input, !existing);
+    const c = await this.build(input, existing, existing?.waveId ?? null, releaseAt === undefined ? existing?.releaseAt ?? null : releaseAt);
     this.commit((d) => {
       const i = d.challenges.findIndex((x) => x.id === c.id);
       if (i >= 0) d.challenges[i] = c; else d.challenges.push(c);
     });
     return c;
   }
+  setRelease(id: string, releaseAt: string | null) {
+    this.requireAdmin();
+    this.commit((d) => { const c = d.challenges.find((x) => x.id === id); if (c) c.releaseAt = releaseAt; });
+  }
   deleteChallenge(id: string) {
     this.requireAdmin();
-    this.commit((d) => { d.challenges = d.challenges.filter((c) => c.id !== id); d.submissions = d.submissions.filter((s) => s.challengeId !== id); });
+    this.commit((d) => {
+      d.challenges = d.challenges.filter((c) => c.id !== id);
+      d.submissions = d.submissions.filter((s) => s.challengeId !== id);
+      d.waves = d.waves.filter((w) => d.challenges.some((c) => c.waveId === w.id));
+    });
   }
 
   /**
-   * Bulk-load a wave of challenges into one round.
-   * Accepts a JSON array of objects, or CSV with a header row:
-   *   title,type,points,flag,description,hint,files
-   * `type` matches a challenge type name (case-insensitive) or id. `files` is "name|url;name|url".
+   * Reads challenges from CSV (header: title,type,theme,points,flag,description,hint,files) or a JSON array.
+   * `type` is a type name or id; `theme` one of plastics, energy, water, ewaste, food, climate; `files` is "name|url;name|url".
+   * Returns the parsed challenges so the admin can review them in the form before posting.
    */
-  async importChallenges(roundId: string, text: string): Promise<ImportReport> {
-    this.requireAdmin();
-    if (!this.state.rounds.some((r) => r.id === roundId)) throw new BackendError("Pick a round to import into.");
-    let items: Record<string, unknown>[] = [];
-    const trimmed = text.trim();
-    if (trimmed.startsWith("[")) {
-      try { items = JSON.parse(trimmed); } catch { throw new BackendError("That JSON could not be read. Check for a missing comma or bracket."); }
+  parseChallengeFile(text: string): ParsedFile {
+    let rows: Record<string, unknown>[] = [];
+    const t = text.trim();
+    if (t.startsWith("[")) {
+      try { rows = JSON.parse(t); } catch { throw new BackendError("That JSON could not be read. Check for a missing comma or bracket."); }
     } else {
-      const rows = parseCSV(trimmed);
-      if (rows.length < 2) throw new BackendError("The CSV needs a header row and at least one challenge.");
-      const head = rows[0].map((h) => h.toLowerCase());
-      items = rows.slice(1).map((r) => Object.fromEntries(head.map((h, i) => [h, r[i] ?? ""])));
+      const csv = parseCSV(t);
+      if (csv.length < 2) throw new BackendError("The CSV needs a header row and at least one challenge.");
+      const head = csv[0].map((h) => h.toLowerCase());
+      rows = csv.slice(1).map((r) => Object.fromEntries(head.map((h, i) => [h, r[i] ?? ""])));
     }
+    const items: ChallengeInput[] = [];
     const errors: string[] = [];
-    let added = 0;
-    for (const [i, it] of items.entries()) {
-      const line = `Row ${i + 1}`;
-      const typeKey = String(it.type ?? "").toLowerCase();
-      const type = this.state.types.find((t) => t.id.toLowerCase() === typeKey || t.name.toLowerCase() === typeKey);
+    rows.forEach((it, i) => {
+      const n = `Row ${i + 1}`;
+      const key = String(it.type ?? "").toLowerCase();
+      const type = this.state.types.find((x) => x.id.toLowerCase() === key || x.name.toLowerCase() === key);
+      const theme = String(it.theme ?? "plastics").toLowerCase().replace(/[^a-z]/g, "") as ThemeKey;
       const points = Number(it.points);
-      if (!String(it.title ?? "").trim()) { errors.push(`${line}: missing title`); continue; }
-      if (!type) { errors.push(`${line}: unknown type "${it.type ?? ""}"`); continue; }
-      if (!(points > 0)) { errors.push(`${line}: points must be a number above 0`); continue; }
-      if (!String(it.flag ?? "").trim()) { errors.push(`${line}: missing flag`); continue; }
+      if (!String(it.title ?? "").trim()) return errors.push(`${n}: missing title`);
+      if (!type) return errors.push(`${n}: unknown type "${it.type ?? ""}"`);
+      if (!(points > 0)) return errors.push(`${n}: points must be a number above 0`);
+      if (!String(it.flag ?? "").trim()) return errors.push(`${n}: missing flag`);
       const files = Array.isArray(it.files) ? (it.files as { name: string; url: string }[])
         : String(it.files ?? "").split(";").map((p) => p.split("|")).filter((p) => p[0]?.trim() && p[1]?.trim()).map(([name, url]) => ({ name: name.trim(), url: url.trim() }));
-      await this.saveChallenge(null, {
-        roundId, typeId: type.id, title: String(it.title), description: String(it.description ?? ""), points,
-        flag: String(it.flag), caseSensitive: String(it.caseSensitive ?? it.case_sensitive ?? "").toLowerCase() === "true",
-        files, hint: String(it.hint ?? ""), hidden: false,
-      });
-      added++;
-    }
-    return { added, errors };
+      items.push({ typeId: type.id, theme: THEMES.includes(theme) ? theme : "plastics", title: String(it.title).trim(), description: String(it.description ?? ""),
+        points, flag: String(it.flag).trim(), caseSensitive: String(it.caseSensitive ?? it.case_sensitive ?? "").toLowerCase() === "true",
+        files, hint: String(it.hint ?? ""), hidden: false });
+    });
+    return { items, errors };
   }
 
-  private async newMember(teamId: string, teamName: string, displayName: string, index: number): Promise<{ user: User; cred: Credential }> {
+  // ---------------------------------------------------------------- admin: people
+  private async newMember(teamId: string, teamName: string, displayName: string, index: number, taken: Set<string>): Promise<{ user: User; cred: Credential }> {
     const base = `${slug(teamName)}-${index}`;
     let username = base, n = 2;
-    while (this.state.users.some((u) => u.username === username)) username = `${base}-${n++}`;
+    while (taken.has(username)) username = `${base}-${n++}`;
+    taken.add(username);
     const password = tempPassword();
     const user = await makeUser({ id: randomId("u-"), username, displayName: displayName.trim() || `${teamName} member ${index}`, role: "player", teamId, mustChangePassword: true, password });
     return { user, cred: { team: teamName, displayName: user.displayName, username, password } };
@@ -287,23 +338,22 @@ export class LocalBackend implements Backend {
   async createTeam(name: string, members: string[]) {
     this.requireAdmin();
     const teamName = name.trim();
+    const size = this.state.settings.teamSize;
     if (!teamName) throw new BackendError("Give the team a name.");
     if (this.state.teams.some((t) => t.name.toLowerCase() === teamName.toLowerCase())) throw new BackendError(`A team called "${teamName}" already exists.`);
     const names = members.map((m) => m.trim()).filter(Boolean);
-    if (names.length === 0) throw new BackendError("Add at least one member.");
+    if (names.length === 0) throw new BackendError("Add the team's members.");
+    if (names.length > size) throw new BackendError(`Teams have up to ${size} members. Change the team size in Settings if you need more.`);
+    if (new Set(names.map((n) => n.toLowerCase())).size !== names.length) throw new BackendError("Two members have the same name. Add a surname or initial so they can find themselves at login.");
     const team: Team = { id: randomId("t-"), name: teamName, createdAt: new Date().toISOString() };
+    const taken = new Set(this.state.users.map((u) => u.username));
     const created: { user: User; cred: Credential }[] = [];
-    for (const [i, m] of names.entries()) {
-      const x = await this.newMember(team.id, teamName, m, i + 1);
-      created.push(x);
-      this.state.users.push(x.user); // reserve username for the next loop iteration
-    }
-    this.state.users = this.state.users.filter((u) => !created.some((c) => c.user.id === u.id));
+    for (const [i, m] of names.entries()) created.push(await this.newMember(team.id, teamName, m, i + 1, taken));
     this.commit((d) => { d.teams.push(team); d.users.push(...created.map((c) => c.user)); });
     return created.map((c) => c.cred);
   }
 
-  /** CSV: team,member1,member2,member3[,member4] (header optional). */
+  /** CSV: team,member1,member2,member3 (header optional). */
   async importTeams(csv: string) {
     this.requireAdmin();
     const rows = parseCSV(csv);
@@ -335,7 +385,8 @@ export class LocalBackend implements Backend {
     const team = this.state.teams.find((t) => t.id === teamId);
     if (!team) throw new BackendError("Team not found.");
     const count = this.state.users.filter((u) => u.teamId === teamId).length;
-    const x = await this.newMember(teamId, team.name, displayName, count + 1);
+    if (count >= this.state.settings.teamSize) throw new BackendError(`${team.name} already has ${count} members, the team size limit.`);
+    const x = await this.newMember(teamId, team.name, displayName, count + 1, new Set(this.state.users.map((u) => u.username)));
     this.commit((d) => d.users.push(x.user));
     return x.cred;
   }
@@ -347,27 +398,28 @@ export class LocalBackend implements Backend {
     const salt = randomSalt();
     const hash = await hashPassword(password, salt);
     this.commit((d) => { const x = d.users.find((y) => y.id === userId)!; x.passwordSalt = salt; x.passwordHash = hash; x.mustChangePassword = true; });
-    const team = this.state.teams.find((t) => t.id === u.teamId);
-    return { team: team?.name ?? "(admin)", displayName: u.displayName, username: u.username, password };
+    return { team: this.state.teams.find((t) => t.id === u.teamId)?.name ?? "(admin)", displayName: u.displayName, username: u.username, password };
   }
   deleteUser(userId: string) {
     const me = this.requireAdmin();
     if (userId === me.id) throw new BackendError("You can't delete your own account while logged in.");
     this.commit((d) => { d.users = d.users.filter((u) => u.id !== userId); });
   }
-  postAnnouncement(text: string) {
+
+  // ---------------------------------------------------------------- admin: notifications and data
+  postNotification(title: string, body: string, level: NoticeLevel) {
     this.requireAdmin();
-    if (!text.trim()) return;
-    this.commit((d) => d.announcements.unshift({ id: randomId("a-"), text: text.trim(), at: new Date().toISOString() }));
+    if (!title.trim() && !body.trim()) throw new BackendError("Write a title or a message.");
+    this.commit((d) => d.notifications.unshift({ id: randomId("n-"), title: title.trim(), body: body.trim(), level, at: new Date().toISOString() }));
   }
-  deleteAnnouncement(id: string) { this.requireAdmin(); this.commit((d) => { d.announcements = d.announcements.filter((a) => a.id !== id); }); }
+  deleteNotification(id: string) { this.requireAdmin(); this.commit((d) => { d.notifications = d.notifications.filter((a) => a.id !== id); }); }
 
   exportJSON() { this.requireAdmin(); return JSON.stringify(this.state, null, 2); }
   importJSON(text: string) {
     this.requireAdmin();
     let d: DB;
     try { d = JSON.parse(text); } catch { throw new BackendError("That file isn't a valid EcoCypher backup."); }
-    if (d?.version !== 1 || !Array.isArray(d.users)) throw new BackendError("That file isn't a valid EcoCypher backup.");
+    if (d?.version !== 2 || !Array.isArray(d.users)) throw new BackendError("That file isn't a valid EcoCypher backup.");
     if (!d.users.some((u) => u.role === "admin")) throw new BackendError("The backup has no admin account, so you'd be locked out.");
     this.state = d; this.persist(); this.emit();
   }

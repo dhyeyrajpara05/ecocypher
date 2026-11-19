@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
-import type { ChallengeType, RoundStatus } from "../data/types";
+import type { ChallengeType } from "../data/types";
 
 export function Logo({ light = false, size = 30 }: { light?: boolean; size?: number }) {
   return (
@@ -18,17 +18,6 @@ export function Logo({ light = false, size = 30 }: { light?: boolean; size?: num
 export function TypeChip({ type }: { type?: ChallengeType }) {
   if (!type) return null;
   return <span className="chip" style={{ background: `${type.colour}1a`, color: type.colour }}><i className="h-1.5 w-1.5 rounded-full" style={{ background: type.colour }} />{type.name}</span>;
-}
-
-const ROUND_STYLE: Record<RoundStatus, [string, string]> = {
-  draft: ["bg-fin-200/50 text-fin", "Draft"],
-  upcoming: ["bg-brass-100 text-brass-600", "Scheduled"],
-  open: ["bg-kelp-100 text-kelp-600", "Open"],
-  closed: ["bg-deep/10 text-deep/70", "Closed"],
-};
-export function RoundChip({ status }: { status: RoundStatus }) {
-  const [cls, label] = ROUND_STYLE[status];
-  return <span className={`chip ${cls}`}>{status === "open" && <i className="h-1.5 w-1.5 animate-pulse rounded-full bg-kelp" />}{label}</span>;
 }
 
 export function Modal({ open, onClose, title, children, wide = false }: { open: boolean; onClose: () => void; title: string; children: ReactNode; wide?: boolean }) {

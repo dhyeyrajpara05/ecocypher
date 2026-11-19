@@ -1,25 +1,21 @@
 // Pure scoring and status logic. No storage, so it can be unit-tested and reused on a server later.
-import type { Challenge, DB, Round, RoundStatus, ScoreRow, Submission } from "./types";
+import type { Challenge, DB, ReleaseStatus, ScoreRow, Submission } from "./types";
 
-export function roundStatus(r: Round, now: Date = new Date()): RoundStatus {
-  if (r.state === "draft") return "draft";
-  if (r.state === "closed") return "closed";
-  const t = now.getTime();
-  if (r.opensAt && t < Date.parse(r.opensAt)) return "upcoming";
-  if (r.closesAt && t >= Date.parse(r.closesAt)) return "closed";
-  return "open";
+export function releaseStatus(c: Challenge, now: Date = new Date()): ReleaseStatus {
+  if (!c.releaseAt) return "draft";
+  return Date.parse(c.releaseAt) > now.getTime() ? "scheduled" : "live";
 }
 
-/** Challenges a player can see: in a round that is open or closed (closed rounds stay visible, read-only), not hidden. */
+/** Challenges a player can see: released and not hidden. Drafts and scheduled ones are never shown. */
 export function visibleChallenges(db: DB, now: Date = new Date()): Challenge[] {
-  const status = new Map(db.rounds.map((r) => [r.id, roundStatus(r, now)]));
-  return db.challenges.filter((c) => !c.hidden && ["open", "closed"].includes(status.get(c.roundId) ?? "draft"));
+  return db.challenges.filter((c) => !c.hidden && releaseStatus(c, now) === "live");
 }
 
-export function eventStatus(db: DB, now: Date = new Date()): "before" | "live" | "after" {
-  const t = now.getTime();
-  if (db.settings.startsAt && t < Date.parse(db.settings.startsAt)) return "before";
-  if (db.settings.endsAt && t >= Date.parse(db.settings.endsAt)) return "after";
+export type EventStatus = "not-started" | "live" | "ended";
+export function eventStatus(db: DB, now: Date = new Date()): EventStatus {
+  const { startsAt, endsAt } = db.settings;
+  if (!startsAt || now.getTime() < Date.parse(startsAt)) return "not-started";
+  if (endsAt && now.getTime() >= Date.parse(endsAt)) return "ended";
   return "live";
 }
 
@@ -40,7 +36,7 @@ export function solves(db: DB, until?: Date): Submission[] {
 
 /**
  * Team scoreboard.
- *  - Each challenge is worth its own points, awarded once per team to the member who solved it.
+ *  - Each challenge is worth its own points, awarded once per team, credited to the member who solved it.
  *  - Ranking: higher score first; on equal score the team that reached that score EARLIER ranks higher.
  *  - Teams with no solves rank last, by name.
  */
@@ -89,6 +85,4 @@ export function solveCounts(db: DB): Map<string, number> {
   return m;
 }
 
-export function formatValuation(points: number): string {
-  return `₹${points.toLocaleString("en-IN")}`;
-}
+export const WAVE_SIZE = 5;

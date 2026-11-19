@@ -1,10 +1,11 @@
 import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { LocalBackend, type Backend } from "./backend";
+import { browserCipher } from "./vault";
 
 const Ctx = createContext<Backend | null>(null);
 
 export function BackendProvider({ children }: { children: ReactNode }) {
-  const [be] = useState<Backend>(() => new LocalBackend());
+  const [be] = useState<Backend>(() => new LocalBackend(window.localStorage, browserCipher()));
   const [ready, setReady] = useState(false);
   useEffect(() => { be.ready().then(() => setReady(true)); }, [be]);
   if (!ready) {

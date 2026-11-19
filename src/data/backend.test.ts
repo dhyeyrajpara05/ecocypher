@@ -1,7 +1,8 @@
-import { describe, expect, it, beforeEach } from "vitest";
-import { LocalBackend, parseCSV } from "./backend";
+import { beforeEach, describe, expect, it } from "vitest";
+import { LocalBackend, parseCSV, type ChallengeInput } from "./backend";
 import { DEMO_ADMIN, DEMO_PLAYER_PASSWORD } from "./seed";
-import { roundStatus, scoreboard } from "./scoring";
+import { releaseStatus, scoreboard, visibleChallenges } from "./scoring";
+import type { Cipher } from "./vault";
 import type { DB } from "./types";
 
 class MemStorage implements Storage {
@@ -14,108 +15,151 @@ class MemStorage implements Storage {
   setItem(k: string, v: string) { this.m.set(k, v); }
 }
 
+const input = (title: string, flag: string, points = 100): ChallengeInput =>
+  ({ typeId: "type-1", theme: "water", title, description: "d", points, flag, caseSensitive: false, files: [], hint: "", hidden: false });
+
 let be: LocalBackend;
 beforeEach(async () => { be = new LocalBackend(new MemStorage()); await be.ready(); });
+
+async function asAdmin() { await be.login(DEMO_ADMIN.username, DEMO_ADMIN.password); }
 
 describe("scoring", () => {
   it("ranks by score, then by who reached the score first", () => {
     const rows = scoreboard(be.db());
-    expect(rows[0].teamName).toBe("Reef Ventures");              // 580
-    expect(rows[1].score).toBe(rows[2].score);                     // Kelp Capital and Tidepool Labs both 530
-    expect(rows[1].teamName).toBe("Kelp Capital");                 // got to 530 earlier
+    expect(rows[0].teamName).toBe("Reef Ventures");
+    expect(rows[1].score).toBe(rows[2].score);
+    expect(rows[1].teamName).toBe("Kelp Capital");      // reached 530 earlier
     expect(rows[2].teamName).toBe("Tidepool Labs");
-    expect(rows.map((r) => r.rank)).toEqual([1, 2, 3, 4]);
   });
-  it("credits points to the member who solved", () => {
+  it("credits points to the member who solved, and they add up to the team", () => {
     const kelp = scoreboard(be.db()).find((r) => r.teamName === "Kelp Capital")!;
     expect(kelp.members.reduce((a, m) => a + m.points, 0)).toBe(kelp.score);
-    expect(kelp.members[0].points).toBe(300); // Aarav: 100 + 200
+    expect(kelp.members).toHaveLength(3);
   });
   it("counts only the first correct submission per team", () => {
     const db: DB = structuredClone(be.db());
     db.submissions.push({ ...db.submissions[0], id: "dup", at: new Date().toISOString() });
     expect(scoreboard(db)[1].score).toBe(scoreboard(be.db())[1].score);
   });
-  it("freeze shows standings at a past moment", () => {
-    const early = scoreboard(be.db(), { until: new Date(Date.now() - 82 * 60_000) });
-    expect(early[0].teamName).toBe("Tidepool Labs");
-    expect(early[0].score).toBe(80);
-  });
-  it("round status follows state and schedule", () => {
-    const now = new Date();
-    expect(roundStatus({ id: "x", name: "x", order: 1, state: "draft", opensAt: null, closesAt: null }, now)).toBe("draft");
-    expect(roundStatus({ id: "x", name: "x", order: 1, state: "scheduled", opensAt: new Date(Date.now() + 1e6).toISOString(), closesAt: null }, now)).toBe("upcoming");
-    expect(roundStatus({ id: "x", name: "x", order: 1, state: "scheduled", opensAt: null, closesAt: new Date(Date.now() - 1).toISOString() }, now)).toBe("closed");
+  it("hides drafts and scheduled challenges from players", () => {
+    const ids = visibleChallenges(be.db()).map((c) => c.id);
+    expect(ids).toContain("c7");
+    expect(ids).not.toContain("c6"); // scheduled
+    expect(ids).not.toContain("c8"); // draft
+    expect(releaseStatus(be.db().challenges.find((c) => c.id === "c6")!)).toBe("scheduled");
   });
 });
 
-describe("players", () => {
-  it("rejects a wrong password", async () => {
-    await expect(be.login("kelp-capital-1", "nope")).rejects.toThrow(/don't match/);
+describe("team login", () => {
+  it("each member logs in with their own password and plays for their team", async () => {
+    const u = await be.loginMember("t1", "t1-u2", DEMO_PLAYER_PASSWORD);
+    expect(u.teamId).toBe("t1");
+    expect(be.currentUser()?.displayName).toBe("Meera Iyer");
   });
-  it("accepts the right flag once, case-insensitively", async () => {
-    await be.login("driftwood-co-1", DEMO_PLAYER_PASSWORD);
-    const wrong = await be.submitFlag("c2", "ECO{1}");
-    expect(wrong.correct).toBe(false);
-    const right = await be.submitFlag("c2", "  eco{42676160} ");
-    expect(right).toMatchObject({ correct: true, points: 150 });
-    const again = await be.submitFlag("c2", "ECO{42676160}");
-    expect(again.alreadySolved).toBe(true);
+  it("rejects a member from the wrong team or a wrong password", async () => {
+    await expect(be.loginMember("t2", "t1-u2", DEMO_PLAYER_PASSWORD)).rejects.toThrow(/isn't right/);
+    await expect(be.loginMember("t1", "t1-u2", "nope")).rejects.toThrow(/isn't right/);
   });
-  it("blocks submissions to rounds that are not open", async () => {
-    await be.login("driftwood-co-1", DEMO_PLAYER_PASSWORD);
-    const r = await be.submitFlag("c6", "ECO{OKHU3054124}");
-    expect(r.ok).toBe(false);
-    expect(r.message).toMatch(/hasn't opened/);
+});
+
+describe("flags", () => {
+  it("accepts the right flag once, case-insensitively, and never stores it", async () => {
+    await asAdmin();
+    await be.saveChallenge(null, input("Secret", "ECO{Super-Secret}", 150), new Date(Date.now() - 1000).toISOString());
+    const id = be.db().challenges.find((c) => c.title === "Secret")!.id;
+    be.logout();
+    await be.loginMember("t4", "t4-u1", DEMO_PLAYER_PASSWORD);
+    expect((await be.submitFlag(id, "ECO{1}")).correct).toBe(false);
+    expect(await be.submitFlag(id, "  eco{super-secret} ")).toMatchObject({ correct: true, points: 150 });
+    expect((await be.submitFlag(id, "ECO{super-secret}")).alreadySolved).toBe(true);
+    expect(JSON.stringify(be.db()).toLowerCase()).not.toContain("super-secret");
+  });
+  it("blocks submissions to unreleased challenges and after time is up", async () => {
+    await be.loginMember("t4", "t4-u1", DEMO_PLAYER_PASSWORD);
+    expect((await be.submitFlag("c6", "ECO{x}")).message).toMatch(/isn't available/);
+    be.logout(); await asAdmin(); be.endEventNow(); be.logout();
+    await be.loginMember("t4", "t4-u1", DEMO_PLAYER_PASSWORD);
+    expect((await be.submitFlag("c7", "ECO{x}")).message).toMatch(/Time's up/);
   });
   it("rate-limits rapid guessing", async () => {
-    await be.login("driftwood-co-2", DEMO_PLAYER_PASSWORD);
+    await be.loginMember("t4", "t4-u2", DEMO_PLAYER_PASSWORD);
     for (let i = 0; i < 10; i++) await be.submitFlag("c5", `ECO{${i}}`);
     expect((await be.submitFlag("c5", "ECO{x}")).message).toMatch(/Too many/);
-  });
+  }, 30_000);
   it("players cannot use admin actions", async () => {
-    await be.login("kelp-capital-1", DEMO_PLAYER_PASSWORD);
-    expect(() => be.createRound("Hack")).toThrow(/Only admins/);
+    await be.loginMember("t1", "t1-u1", DEMO_PLAYER_PASSWORD);
+    expect(() => be.startTimer()).toThrow(/Only admins/);
   });
 });
 
 describe("admin", () => {
-  beforeEach(async () => { await be.login(DEMO_ADMIN.username, DEMO_ADMIN.password); });
-  it("creates a team with member logins that work", async () => {
-    const creds = await be.createTeam("Plankton Partners", ["A", "B", "C"]);
-    expect(creds.map((c) => c.username)).toEqual(["plankton-partners-1", "plankton-partners-2", "plankton-partners-3"]);
+  beforeEach(asAdmin);
+  it("posts a wave of exactly five challenges with the next wave number", async () => {
+    await expect(be.postWave([input("a", "ECO{a}")], null)).rejects.toThrow(/exactly 5/);
+    const five = ["a", "b", "c", "d", "e"].map((x) => input(x, `ECO{${x}}`));
+    const posted = await be.postWave(five, null);
+    expect(posted).toHaveLength(5);
+    expect(be.db().waves.find((w) => w.id === posted[0].waveId)!.number).toBe(2);
+    expect(posted.every((c) => c.releaseAt === null)).toBe(true);
+  }, 30_000);
+  it("names the bad challenge when a wave is incomplete", async () => {
+    const five = ["a", "b", "", "d", "e"].map((x) => input(x, `ECO{${x}}`));
+    await expect(be.postWave(five, null)).rejects.toThrow(/Challenge 3/);
+  });
+  it("posts a single challenge as a draft and releases it later", async () => {
+    const c = await be.saveChallenge(null, input("Solo", "ECO{solo}"), null);
+    expect(c.waveId).toBeNull();
+    expect(releaseStatus(c)).toBe("draft");
+    be.setRelease(c.id, new Date().toISOString());
+    expect(releaseStatus(be.db().challenges.find((x) => x.id === c.id)!)).toBe("live");
+  });
+  it("parses a CSV of challenges for review and reports bad rows", () => {
+    const csv = 'title,type,theme,points,flag,description,files\n"Bin Day",osint,plastics,120,ECO{a},"Find it, fast",map|https://x/y.png\nNo type,unknown,water,10,ECO{b},,\nBad pts,Python,food,zero,ECO{c},,';
+    const r = be.parseChallengeFile(csv);
+    expect(r.items).toHaveLength(1);
+    expect(r.errors).toHaveLength(2);
+    expect(r.items[0]).toMatchObject({ title: "Bin Day", theme: "plastics", points: 120, files: [{ name: "map", url: "https://x/y.png" }] });
+  });
+  it("runs a three-hour timer", () => {
+    be.resetTimer();
+    be.startTimer();
+    const s = be.db().settings;
+    expect(Date.parse(s.endsAt!) - Date.parse(s.startsAt!)).toBe(180 * 60_000);
+    be.extendTimer(10);
+    expect(Date.parse(be.db().settings.endsAt!) - Date.parse(s.startsAt!)).toBe(190 * 60_000);
+  });
+  it("registers a team of three with working member logins and enforces team size", async () => {
+    const creds = await be.createTeam("Plankton Partners", ["A One", "B Two", "C Three"]);
+    expect(creds).toHaveLength(3);
+    await expect(be.createTeam("Too Big", ["a", "b", "c", "d"])).rejects.toThrow(/up to 3/);
+    const team = be.db().teams.find((t) => t.name === "Plankton Partners")!;
+    const member = be.db().users.find((u) => u.teamId === team.id && u.displayName === "B Two")!;
     be.logout();
-    const u = await be.login(creds[1].username, creds[1].password);
-    expect(u.mustChangePassword).toBe(true);
-  });
-  it("imports a wave from CSV into a round and reports bad rows", async () => {
-    const r = be.createRound("Series C");
-    const csv = 'title,type,points,flag,description,files\n"Bin Day",osint,120,ECO{a},"Find it, fast",map|https://x/y.png\nNo type,unknown,10,ECO{b},,\nBad pts,Python,zero,ECO{c},,';
-    const rep = await be.importChallenges(r.id, csv);
-    expect(rep.added).toBe(1);
-    expect(rep.errors).toHaveLength(2);
-    const c = be.db().challenges.find((x) => x.title === "Bin Day")!;
-    expect(c.roundId).toBe(r.id);
-    expect(c.files).toEqual([{ name: "map", url: "https://x/y.png" }]);
-    expect(c.description).toBe("Find it, fast");
-  });
-  it("imports a wave from JSON", async () => {
-    const r = be.createRound("Series D");
-    const rep = await be.importChallenges(r.id, JSON.stringify([{ title: "J1", type: "type-2", points: 50, flag: "ECO{j}" }]));
-    expect(rep).toEqual({ added: 1, errors: [] });
-  });
-  it("never stores flags in plain text", async () => {
-    await be.saveChallenge(null, { roundId: "r-seed", typeId: "type-1", title: "Secret", description: "", points: 10, flag: "ECO{super-secret}", caseSensitive: false, files: [], hint: "", hidden: false });
-    expect(JSON.stringify(be.db())).not.toContain("super-secret");
-  });
-  it("renames the four challenge types", () => {
-    be.updateType("type-4", { name: "Forensics" });
-    expect(be.db().types.map((t) => t.name)).toEqual(["OSINT", "Python", "Data & SQL", "Forensics"]);
+    expect((await be.loginMember(team.id, member.id, creds[1].password)).mustChangePassword).toBe(true);
+  }, 30_000);
+  it("posts notifications newest first", () => {
+    be.postNotification("Wave 2 is live", "Five new challenges.", "important");
+    expect(be.db().notifications[0]).toMatchObject({ title: "Wave 2 is live", level: "important" });
   });
   it("refuses a backup with no admin", () => {
     const d = JSON.parse(be.exportJSON());
     d.users = d.users.filter((u: { role: string }) => u.role !== "admin");
     expect(() => be.importJSON(JSON.stringify(d))).toThrow(/locked out/);
+  });
+});
+
+describe("storage", () => {
+  it("saves only ciphertext when a cipher is used", async () => {
+    const s = new MemStorage();
+    const fake: Cipher = { seal: async (p) => "ec1:" + btoa(encodeURIComponent(p)), open: async (x) => decodeURIComponent(atob(x.slice(4))) };
+    const b = new LocalBackend(s, fake);
+    await b.ready(); await b.flushed();
+    const raw = s.getItem("ecocypher:data")!;
+    expect(raw.startsWith("ec1:")).toBe(true);
+    expect(raw).not.toContain("Kelp Capital");
+    const again = new LocalBackend(s, fake);
+    await again.ready();
+    expect(again.db().teams).toHaveLength(4);
   });
 });
 

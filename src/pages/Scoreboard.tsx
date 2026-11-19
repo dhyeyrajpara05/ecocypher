@@ -1,6 +1,7 @@
 import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
 import { useState } from "react";
 import { SiteHeader } from "../components/SiteHeader";
+import { Footer } from "../components/chrome";
 import { CountUp, Empty } from "../components/ui";
 import { scoreboard } from "../data/scoring";
 import { useDB, useNow, useUser } from "../data/store";
@@ -61,9 +62,9 @@ export default function Scoreboard() {
   const end = Math.min(now.getTime(), frozen ? frozen.getTime() : Infinity);
 
   return (
-    <div className="min-h-screen">
+    <div className="flex min-h-screen flex-col">
       <SiteHeader />
-      <main className="mx-auto max-w-6xl px-5 py-10 sm:px-8">
+      <main className="mx-auto w-full max-w-6xl flex-1 px-5 py-10 sm:px-8">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="text-[34px] font-bold">The tank</h1>
@@ -124,6 +125,7 @@ export default function Scoreboard() {
           </>
         )}
       </main>
+      <Footer />
     </div>
   );
 }
