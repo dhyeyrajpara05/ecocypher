@@ -66,14 +66,23 @@ npm run build
 4. **Post challenges**: build a wave of 5 (or load it from the CSV template), or post single challenges. Schedule
    them or keep them as drafts.
 5. On the day, press **Start the 3-hour clock** on the dashboard. Release waves from the **Challenge library** and
-   send updates from **Notifications**.
+   send updates from **Notifications**. If a challenge is too tight, press **+3 attempts** on it in the library;
+   every team gets three more guesses straight away.
+
+### Hints and attempts
+
+- Each challenge can have any number of hints, each with its own cost. Opening a hint takes that cost off the
+  team's score immediately, it's shown to the whole team, and a team is only ever charged once per hint.
+- Attempts are counted per team, across all its members. When they run out, the flag box closes for that team.
+- A wrong flag sets off the "FAAAAAA!!!!!!!!" pop-up and sound. Players can switch the sound off in the challenge window.
 
 ### CSV format for challenges
 
 ```csv
-title,type,theme,points,flag,description,hint,files
-"Bin Day",OSINT,plastics,100,ECO{...},"Which photo was taken at the dock?","Check the metadata",photos.zip|files/photos.zip
+title,type,theme,points,flag,description,hint,hint_cost,attempts,files
+"Bin Day",OSINT,plastics,100,ECO{...},"Which photo was taken at the dock?","Check the metadata",10,10,photos.zip|files/photos.zip
 ```
 
 `type` is one of your four type names; `theme` is plastics, energy, water, ewaste, food or climate; `files` is
-`name|url;name|url`. Put challenge files in `public/files/` and link them as `files/<name>`.
+`name|url;name|url`. `hint_cost` is the points a team loses when it opens the hint (0 = free). `attempts` is the
+number of wrong guesses each team gets (0 = unlimited). Add more hints, or more attempts, in the challenge editor. Put challenge files in `public/files/` and link them as `files/<name>`.

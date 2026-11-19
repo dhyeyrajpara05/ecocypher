@@ -1,4 +1,6 @@
 import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
+import { AnimatePresence } from "framer-motion";
+import { Loader } from "../components/Loader";
 import { LocalBackend, type Backend } from "./backend";
 import { browserCipher } from "./vault";
 
@@ -7,11 +9,18 @@ const Ctx = createContext<Backend | null>(null);
 export function BackendProvider({ children }: { children: ReactNode }) {
   const [be] = useState<Backend>(() => new LocalBackend(window.localStorage, browserCipher()));
   const [ready, setReady] = useState(false);
+  const [minDone, setMinDone] = useState(false);
+  const [hold, setHold] = useState(true);
   useEffect(() => { be.ready().then(() => setReady(true)); }, [be]);
-  if (!ready) {
-    return <div className="grid min-h-screen place-items-center bg-deep font-display text-aqua">Filling the tank…</div>;
-  }
-  return <Ctx.Provider value={be}>{children}</Ctx.Provider>;
+  // Keep the loading page up long enough to be seen, then let the name finish decrypting.
+  useEffect(() => { const t = setTimeout(() => setMinDone(true), 1700); return () => clearTimeout(t); }, []);
+  useEffect(() => { if (ready && minDone) { const t = setTimeout(() => setHold(false), 450); return () => clearTimeout(t); } }, [ready, minDone]);
+  return (
+    <>
+      {ready && <Ctx.Provider value={be}>{children}</Ctx.Provider>}
+      <AnimatePresence>{hold && <Loader key="loader" done={ready && minDone} />}</AnimatePresence>
+    </>
+  );
 }
 
 export function useBackend(): Backend {

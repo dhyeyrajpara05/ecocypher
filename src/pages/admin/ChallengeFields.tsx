@@ -3,7 +3,7 @@ import { THEMES, type ChallengeInput } from "../../data/backend";
 import { useDB } from "../../data/store";
 
 export function blankChallenge(typeId: string): ChallengeInput {
-  return { typeId, theme: "plastics", title: "", description: "", points: 100, flag: "", caseSensitive: false, files: [], hint: "", hidden: false };
+  return { typeId, theme: "plastics", title: "", description: "", points: 100, flag: "", caseSensitive: false, files: [], hints: [], maxAttempts: 0, hidden: false };
 }
 
 /** The editable fields of one challenge. Used for wave slots, single challenges and edits. */
@@ -33,7 +33,24 @@ export function ChallengeFields({ value, onChange, idPrefix, editing = false }: 
       <div className="sm:col-span-3"><label className="label" htmlFor={id("f")}>Flag</label>
         <input id={id("f")} className="field font-mono" value={value.flag ?? ""} onChange={(e) => set("flag", e.target.value)} placeholder={editing ? "Leave empty to keep the current flag" : "ECO{...}"} autoComplete="off" spellCheck={false} />
         <label className="mt-1.5 flex items-center gap-2 text-[13px]"><input type="checkbox" checked={value.caseSensitive} onChange={(e) => set("caseSensitive", e.target.checked)} />Case-sensitive</label></div>
-      <div className="sm:col-span-3"><label className="label" htmlFor={id("h")}>Hint (optional, free)</label><input id={id("h")} className="field" value={value.hint} onChange={(e) => set("hint", e.target.value)} /></div>
+      <div className="sm:col-span-3"><label className="label" htmlFor={id("a")}>Attempts per team</label>
+        <input id={id("a")} type="number" min={0} className="field" value={value.maxAttempts} onChange={(e) => set("maxAttempts", Math.max(0, Number(e.target.value)))} />
+        <p className="mt-1.5 text-[13px] text-deep/60">{value.maxAttempts > 0 ? `Each team gets ${value.maxAttempts} wrong guess${value.maxAttempts === 1 ? "" : "es"}. You can add more later.` : "0 means unlimited."}</p></div>
+      <div className="sm:col-span-6">
+        <p className="label">Hints (optional)</p>
+        {value.hints.map((h, i) => (
+          <div key={i} className="mb-2 flex flex-wrap gap-2 sm:flex-nowrap">
+            <input className="field" placeholder={`Hint ${i + 1}`} value={h.text} aria-label={`Hint ${i + 1} text`}
+              onChange={(e) => set("hints", value.hints.map((y, j) => j === i ? { ...y, text: e.target.value } : y))} />
+            <label className="flex shrink-0 items-center gap-2 text-[13px] text-deep/70">Costs
+              <input type="number" min={0} className="field w-24" value={h.cost} aria-label={`Hint ${i + 1} cost in points`}
+                onChange={(e) => set("hints", value.hints.map((y, j) => j === i ? { ...y, cost: Math.max(0, Number(e.target.value)) } : y))} />points</label>
+            <button type="button" className="btn btn-line btn-sm" onClick={() => set("hints", value.hints.filter((_, j) => j !== i))}>Remove</button>
+          </div>
+        ))}
+        <button type="button" className="btn btn-line btn-sm" onClick={() => set("hints", [...value.hints, { text: "", cost: Math.round(value.points * 0.1) }])}>Add a hint</button>
+        {value.hints.length > 0 && <p className="mt-1.5 text-[13px] text-deep/60">Opening a hint takes its cost off the team's score. Set 0 for a free hint.</p>}
+      </div>
       <div className="sm:col-span-6">
         <p className="label">File links (optional)</p>
         {value.files.map((x, i) => (

@@ -24,7 +24,7 @@ function EditModal({ c, onClose }: { c: Challenge | null; onClose: () => void })
   const [error, setError] = useState("");
   if (c && seen !== c.id) {
     setSeen(c.id); setError("");
-    setV({ typeId: c.typeId, theme: c.theme, title: c.title, description: c.description, points: c.points, flag: "", caseSensitive: c.caseSensitive, files: c.files, hint: c.hint, hidden: c.hidden });
+    setV({ typeId: c.typeId, theme: c.theme, title: c.title, description: c.description, points: c.points, flag: "", caseSensitive: c.caseSensitive, files: c.files, hints: c.hints, maxAttempts: c.maxAttempts, hidden: c.hidden });
   }
   return (
     <Modal open={!!c} onClose={() => { setSeen(null); onClose(); }} title={`Edit ${c?.title ?? ""}`} wide>
@@ -61,6 +61,7 @@ export default function Library() {
   const now = useNow(5000);
   const toast = useToast();
   const counts = solveCounts(db);
+  const opens = (id: string) => db.hintUnlocks.filter((h) => h.challengeId === id).length;
   const [editing, setEditing] = useState<Challenge | null>(null);
   const [scheduling, setScheduling] = useState<Challenge | null>(null);
   const [filter, setFilter] = useState<"all" | ReleaseStatus>("all");
@@ -99,7 +100,8 @@ export default function Library() {
                     <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl" style={{ background: THEME_INFO[c.theme].tint }}><ThemeArt theme={c.theme} size={30} /></span>
                     <span className="min-w-[12rem] flex-1">
                       <span className="block font-semibold">{c.title}{c.hidden && <span className="ml-2 text-[12px] font-normal text-fin">hidden</span>}</span>
-                      <span className="flex flex-wrap items-center gap-2 text-[13px] text-deep/60"><TypeChip type={db.types.find((t) => t.id === c.typeId)} />{c.points} points, {counts.get(c.id) ?? 0} solves</span>
+                      <span className="flex flex-wrap items-center gap-2 text-[13px] text-deep/60"><TypeChip type={db.types.find((t) => t.id === c.typeId)} />{c.points} points, {counts.get(c.id) ?? 0} solves,
+                        {" "}{c.maxAttempts ? `${c.maxAttempts} attempts` : "unlimited attempts"}{c.hints.length ? `, ${c.hints.length} hint${c.hints.length === 1 ? "" : "s"} (${opens(c.id)} opened)` : ""}</span>
                     </span>
                     <span className="text-right text-[13px]">
                       <span className={`chip ${STATUS[st][0]}`}>{STATUS[st][1]}</span>
@@ -109,6 +111,7 @@ export default function Library() {
                       {st !== "live" && <button className="btn btn-kelp btn-sm" onClick={() => { be.setRelease(c.id, new Date().toISOString()); toast(`"${c.title}" is live`, "ok"); }}>Release now</button>}
                       <button className="btn btn-line btn-sm" onClick={() => setScheduling(c)}>Schedule</button>
                       {st !== "draft" && <button className="btn btn-line btn-sm" onClick={() => be.setRelease(c.id, null)}>Unpublish</button>}
+                      {c.maxAttempts > 0 && <button className="btn btn-line btn-sm" title="Give every team 3 more attempts" onClick={() => { be.addAttempts(c.id, 3); toast(`"${c.title}" now allows ${c.maxAttempts + 3} attempts`, "ok"); }}>+3 attempts</button>}
                       <button className="btn btn-line btn-sm" onClick={() => setEditing(c)}>Edit</button>
                       <button className="btn btn-danger btn-sm" onClick={() => { if (confirm(`Delete "${c.title}" and its submissions?`)) { be.deleteChallenge(c.id); toast("Deleted"); } }}>Delete</button>
                     </span>

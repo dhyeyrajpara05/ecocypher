@@ -38,6 +38,22 @@ export interface Wave {
   createdAt: string;
 }
 
+export interface Hint {
+  text: string;
+  /** Points the team loses when it opens this hint. 0 = free. */
+  cost: number;
+}
+
+export interface HintUnlock {
+  id: string;
+  teamId: string;
+  userId: string;
+  challengeId: string;
+  index: number;
+  cost: number;
+  at: string;
+}
+
 export interface ChallengeFile {
   name: string;
   url: string;
@@ -55,7 +71,9 @@ export interface Challenge {
   flagSalt: string;
   caseSensitive: boolean;
   files: ChallengeFile[];
-  hint: string;
+  hints: Hint[];
+  /** Wrong guesses allowed per team. 0 = unlimited. */
+  maxAttempts: number;
   hidden: boolean;
   /** null = draft (never shown to players). Players see it from this moment. */
   releaseAt: string | null;
@@ -96,7 +114,7 @@ export interface Settings {
 }
 
 export interface DB {
-  version: 2;
+  version: 3;
   settings: Settings;
   users: User[];
   teams: Team[];
@@ -104,6 +122,7 @@ export interface DB {
   waves: Wave[];
   challenges: Challenge[];
   submissions: Submission[];
+  hintUnlocks: HintUnlock[];
   notifications: Notification[];
   demo: boolean;
 }
@@ -123,7 +142,9 @@ export interface ScoreRow {
   teamName: string;
   score: number;
   solves: number;
-  /** Time the team reached its current score. Earlier wins ties. */
+  /** Points spent on hints. Already subtracted from score. */
+  hintCost: number;
+  /** Time the team reached its current score (last solve or hint). Earlier wins ties. */
   lastSolveAt: string | null;
   members: MemberScore[];
   history: { at: string; score: number }[];

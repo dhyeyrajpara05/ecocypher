@@ -8,14 +8,14 @@
  */
 import { hashFlag, hashPassword, randomId, randomSalt, sameHash, tempPassword } from "./crypto";
 import { demoDB, freshDB, makeUser } from "./seed";
-import { eventStatus, releaseStatus, solves, WAVE_SIZE } from "./scoring";
-import type { Challenge, ChallengeType, DB, NoticeLevel, Settings, SubmitResult, Team, ThemeKey, User } from "./types";
+import { attemptsLeft, eventStatus, releaseStatus, solves, unlockedHints, WAVE_SIZE } from "./scoring";
+import type { Challenge, ChallengeType, DB, Hint, NoticeLevel, Settings, SubmitResult, Team, ThemeKey, User } from "./types";
 import { plainCipher, type Cipher } from "./vault";
 
 export interface Credential { team: string; displayName: string; username: string; password: string }
 export interface ChallengeInput {
   typeId: string; theme: ThemeKey; title: string; description: string; points: number;
-  flag?: string; caseSensitive: boolean; files: { name: string; url: string }[]; hint: string; hidden: boolean;
+  flag?: string; caseSensitive: boolean; files: { name: string; url: string }[]; hints: Hint[]; maxAttempts: number; hidden: boolean;
 }
 export interface ParsedFile { items: ChallengeInput[]; errors: string[] }
 
@@ -29,6 +29,7 @@ export interface Backend {
   logout(): void;
   changePassword(current: string, next: string): Promise<void>;
   submitFlag(challengeId: string, value: string): Promise<SubmitResult>;
+  unlockHint(challengeId: string, index: number): Hint;
   // admin: event
   updateSettings(patch: Partial<Settings>): void;
   startTimer(): void;
@@ -40,6 +41,7 @@ export interface Backend {
   postWave(items: ChallengeInput[], releaseAt: string | null): Promise<Challenge[]>;
   saveChallenge(id: string | null, input: ChallengeInput, releaseAt?: string | null): Promise<Challenge>;
   setRelease(id: string, releaseAt: string | null): void;
+  addAttempts(id: string, extra: number): void;
   deleteChallenge(id: string): void;
   parseChallengeFile(text: string): ParsedFile;
   // admin: people
@@ -93,6 +95,20 @@ export function parseCSV(text: string): string[][] {
   return rows.map((r) => r.map((x) => x.trim()));
 }
 
+/** Upgrades data saved by older versions of the site. Returns null if it can't be read. */
+export function migrate(d: any): DB | null {
+  if (d?.version === 2) {
+    for (const c of d.challenges ?? []) {
+      c.hints = c.hint ? [{ text: c.hint, cost: 0 }] : [];
+      c.maxAttempts = 0;
+      delete c.hint;
+    }
+    d.hintUnlocks = [];
+    d.version = 3;
+  }
+  return d?.version === 3 ? (d as DB) : null;
+}
+
 export class LocalBackend implements Backend {
   private state!: DB;
   private listeners = new Set<() => void>();
@@ -109,8 +125,8 @@ export class LocalBackend implements Backend {
     const raw = this.storage.getItem(KEY);
     if (raw) {
       try {
-        const d = JSON.parse(await this.cipher.open(raw));
-        if (d?.version === 2) { this.state = d; this.listen(); return; }
+        const d = migrate(JSON.parse(await this.cipher.open(raw)));
+        if (d) { this.state = d; this.persist(); this.listen(); return; }
       } catch { /* unreadable (e.g. key cleared): start over with demo data */ }
     }
     this.storage.removeItem("ecocypher:v1"); // data from the first version
@@ -200,6 +216,7 @@ export class LocalBackend implements Backend {
       return { ok: true, correct: true, alreadySolved: true, message: "Your team already solved this one." };
     }
     if (!value.trim()) return { ok: false, correct: false, message: "Type a flag first." };
+    if (attemptsLeft(d, u.teamId, c) <= 0) return { ok: false, correct: false, message: "Your team has used all its attempts on this challenge. Ask an organiser if you think that's unfair." };
     const since = Date.now() - 60_000;
     if (d.submissions.filter((s) => s.userId === u.id && Date.parse(s.at) > since).length >= d.settings.submissionsPerMinute) {
       return { ok: false, correct: false, message: "Too many attempts. Wait a minute and try again." };
@@ -210,6 +227,20 @@ export class LocalBackend implements Backend {
     return correct
       ? { ok: true, correct: true, points: c.points, message: `Deal! The sharks invested ${c.points} points in your team.` }
       : { ok: true, correct: false, message: "Not quite. That flag isn't right." };
+  }
+
+  /** Opens a hint for the whole team. Its cost comes off the team's score straight away. */
+  unlockHint(challengeId: string, index: number): Hint {
+    const u = this.requireUser();
+    if (u.role !== "player" || !u.teamId) throw new BackendError("Only team members can open hints.");
+    const c = this.state.challenges.find((x) => x.id === challengeId);
+    if (!c || c.hidden || releaseStatus(c) !== "live") throw new BackendError("That challenge isn't available.");
+    const hint = c.hints[index];
+    if (!hint) throw new BackendError("That hint doesn't exist.");
+    if (unlockedHints(this.state, u.teamId, c.id).has(index)) return hint;
+    if (eventStatus(this.state) !== "live") throw new BackendError("Hints open while the clock is running.");
+    this.commit((d) => d.hintUnlocks.push({ id: randomId("h-"), teamId: u.teamId!, userId: u.id, challengeId: c.id, index, cost: hint.cost, at: new Date().toISOString() }));
+    return hint;
   }
 
   // ---------------------------------------------------------------- admin: event
@@ -238,6 +269,8 @@ export class LocalBackend implements Backend {
     if (!(input.points > 0)) throw new BackendError(`${p}points must be more than 0.`);
     if (needFlag && !input.flag?.trim()) throw new BackendError(`${p}add a flag.`);
     if (!this.state.types.some((t) => t.id === input.typeId)) throw new BackendError(`${p}pick a challenge type.`);
+    if (!(input.maxAttempts >= 0)) throw new BackendError(`${p}attempts must be 0 (unlimited) or more.`);
+    if (input.hints.some((h) => h.text.trim() && !(h.cost >= 0))) throw new BackendError(`${p}hint costs can't be negative.`);
   }
 
   private async build(input: ChallengeInput, existing: Challenge | undefined, waveId: string | null, releaseAt: string | null): Promise<Challenge> {
@@ -247,7 +280,9 @@ export class LocalBackend implements Backend {
     else if (existing && existing.caseSensitive !== input.caseSensitive) throw new BackendError("Re-enter the flag when you change case sensitivity.");
     const { flag: _omit, ...rest } = input;
     return { id: existing?.id ?? randomId("c-"), createdAt: existing?.createdAt ?? new Date().toISOString(), ...rest,
-      title: rest.title.trim(), files: rest.files.filter((f) => f.name.trim() && f.url.trim()), waveId, releaseAt, flagSalt, flagHash };
+      title: rest.title.trim(), files: rest.files.filter((f) => f.name.trim() && f.url.trim()),
+      hints: rest.hints.filter((h) => h.text.trim()).map((h) => ({ text: h.text.trim(), cost: Math.round(h.cost) || 0 })),
+      maxAttempts: Math.round(rest.maxAttempts) || 0, waveId, releaseAt, flagSalt, flagHash };
   }
 
   /** Posts exactly five challenges together as the next wave. */
@@ -278,17 +313,26 @@ export class LocalBackend implements Backend {
     this.requireAdmin();
     this.commit((d) => { const c = d.challenges.find((x) => x.id === id); if (c) c.releaseAt = releaseAt; });
   }
+  /** Gives every team more wrong guesses on a challenge. Also works if the limit was 0 (it becomes a limit). */
+  addAttempts(id: string, extra: number) {
+    this.requireAdmin();
+    const c = this.state.challenges.find((x) => x.id === id);
+    if (!c) throw new BackendError("That challenge no longer exists.");
+    if (c.maxAttempts === 0) throw new BackendError("This challenge already has unlimited attempts.");
+    this.commit((d) => { const x = d.challenges.find((y) => y.id === id)!; x.maxAttempts = Math.max(1, x.maxAttempts + extra); });
+  }
   deleteChallenge(id: string) {
     this.requireAdmin();
     this.commit((d) => {
       d.challenges = d.challenges.filter((c) => c.id !== id);
       d.submissions = d.submissions.filter((s) => s.challengeId !== id);
+      d.hintUnlocks = d.hintUnlocks.filter((h) => h.challengeId !== id);
       d.waves = d.waves.filter((w) => d.challenges.some((c) => c.waveId === w.id));
     });
   }
 
   /**
-   * Reads challenges from CSV (header: title,type,theme,points,flag,description,hint,files) or a JSON array.
+   * Reads challenges from CSV (header: title,type,theme,points,flag,description,hint,hint_cost,attempts,files) or a JSON array.
    * `type` is a type name or id; `theme` one of plastics, energy, water, ewaste, food, climate; `files` is "name|url;name|url".
    * Returns the parsed challenges so the admin can review them in the form before posting.
    */
@@ -319,7 +363,8 @@ export class LocalBackend implements Backend {
         : String(it.files ?? "").split(";").map((p) => p.split("|")).filter((p) => p[0]?.trim() && p[1]?.trim()).map(([name, url]) => ({ name: name.trim(), url: url.trim() }));
       items.push({ typeId: type.id, theme: THEMES.includes(theme) ? theme : "plastics", title: String(it.title).trim(), description: String(it.description ?? ""),
         points, flag: String(it.flag).trim(), caseSensitive: String(it.caseSensitive ?? it.case_sensitive ?? "").toLowerCase() === "true",
-        files, hint: String(it.hint ?? ""), hidden: false });
+        files, hidden: false, maxAttempts: Math.max(0, Math.round(Number(it.attempts ?? it.max_attempts ?? 0)) || 0),
+        hints: Array.isArray(it.hints) ? (it.hints as Hint[]) : String(it.hint ?? "").trim() ? [{ text: String(it.hint).trim(), cost: Math.max(0, Number(it.hint_cost ?? it.hintCost ?? 0) || 0) }] : [] });
     });
     return { items, errors };
   }
@@ -378,6 +423,7 @@ export class LocalBackend implements Backend {
       d.teams = d.teams.filter((t) => t.id !== id);
       d.users = d.users.filter((u) => u.teamId !== id);
       d.submissions = d.submissions.filter((s) => s.teamId !== id);
+      d.hintUnlocks = d.hintUnlocks.filter((h) => h.teamId !== id);
     });
   }
   async addMember(teamId: string, displayName: string) {
@@ -419,7 +465,9 @@ export class LocalBackend implements Backend {
     this.requireAdmin();
     let d: DB;
     try { d = JSON.parse(text); } catch { throw new BackendError("That file isn't a valid EcoCypher backup."); }
-    if (d?.version !== 2 || !Array.isArray(d.users)) throw new BackendError("That file isn't a valid EcoCypher backup.");
+    const m = migrate(d);
+    if (!m || !Array.isArray(m.users)) throw new BackendError("That file isn't a valid EcoCypher backup.");
+    d = m;
     if (!d.users.some((u) => u.role === "admin")) throw new BackendError("The backup has no admin account, so you'd be locked out.");
     this.state = d; this.persist(); this.emit();
   }

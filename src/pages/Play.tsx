@@ -1,11 +1,12 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useState } from "react";
 import { AgentNotice } from "../components/AgentNotice";
+import { FaaahPopup, playFaaah, useMute } from "../components/Faaah";
 import { BigTimer, Footer, useEventClock } from "../components/chrome";
 import { SiteHeader } from "../components/SiteHeader";
 import { THEME_INFO, ThemeArt } from "../components/themes";
 import { CountUp, Empty, Modal, TypeChip, useToast } from "../components/ui";
-import { scoreboard, solveCounts, solves, visibleChallenges } from "../data/scoring";
+import { attemptsLeft, scoreboard, solveCounts, solves, unlockedHints, visibleChallenges, wrongAttempts } from "../data/scoring";
 import { useBackend, useDB, useNow, useUser } from "../data/store";
 import type { Challenge } from "../data/types";
 import { ago, clock } from "../lib/format";
@@ -34,13 +35,32 @@ function ChallengeModal({ c, onClose }: { c: Challenge | null; onClose: () => vo
   const [flag, setFlag] = useState("");
   const [msg, setMsg] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  const [showHint, setShowHint] = useState(false);
+  const [confirmHint, setConfirmHint] = useState<number | null>(null);
   const [celebrate, setCelebrate] = useState(0);
+  const [faaah, setFaaah] = useState(0);
+  const [muted, toggleMute] = useMute();
   const type = db.types.find((t) => t.id === c?.typeId);
   const wave = db.waves.find((w) => w.id === c?.waveId);
   const solve = c && solves(db).find((s) => s.teamId === user.teamId && s.challengeId === c.id);
   const solver = solve && db.users.find((u) => u.id === solve.userId);
-  const attempts = c ? db.submissions.filter((s) => s.teamId === user.teamId && s.challengeId === c.id && !s.correct).length : 0;
+  const attempts = c ? wrongAttempts(db, user.teamId!, c.id) : 0;
+  const left = c ? attemptsLeft(db, user.teamId!, c) : Infinity;
+  const opened = c ? unlockedHints(db, user.teamId!, c.id) : new Set<number>();
+  const opener = (i: number) => {
+    const h = c && db.hintUnlocks.find((x) => x.teamId === user.teamId && x.challengeId === c.id && x.index === i);
+    const who = h && db.users.find((u) => u.id === h.userId);
+    return who ? (who.id === user.id ? "you" : who.displayName.split(" ")[0]) : "your team";
+  };
+
+  function openHint(i: number) {
+    if (!c) return;
+    try {
+      be.unlockHint(c.id, i);
+      setConfirmHint(null);
+      const cost = c.hints[i].cost;
+      toast(cost ? `Hint opened. ${cost} points came off your team's score.` : "Hint opened.", "ok");
+    } catch (err) { toast((err as Error).message, "bad"); setConfirmHint(null); }
+  }
   const theme = c ? THEME_INFO[c.theme] : null;
 
   async function submit(e: React.FormEvent) {
@@ -51,10 +71,11 @@ function ChallengeModal({ c, onClose }: { c: Challenge | null; onClose: () => vo
     setBusy(false);
     setMsg({ tone: r.correct ? "ok" : "bad", text: r.message });
     if (r.correct && !r.alreadySolved) { setCelebrate((x) => x + 1); setFlag(""); toast(`${c.title}: +${r.points} points for your team`, "ok"); }
+    if (r.ok && !r.correct) { setFaaah((x) => x + 1); playFaaah(); }
   }
 
   return (
-    <Modal open={!!c} onClose={() => { setMsg(null); setFlag(""); setShowHint(false); onClose(); }} title={c?.title ?? ""} wide>
+    <Modal open={!!c} onClose={() => { setMsg(null); setFlag(""); setConfirmHint(null); onClose(); }} title={c?.title ?? ""} wide>
       {c && theme && (
         <div>
           <AgentNotice />
@@ -77,10 +98,33 @@ function ChallengeModal({ c, onClose }: { c: Challenge | null; onClose: () => vo
               <ul className="flex flex-wrap gap-2">{c.files.map((f) => <li key={f.url}><a className="btn btn-line btn-sm" href={f.url} target="_blank" rel="noreferrer noopener">{f.name}</a></li>)}</ul>
             </div>
           )}
-          {c.hint && (
-            <div className="mt-5">
-              {showHint ? <p className="rounded-xl bg-aqua-200 px-4 py-3 text-[14.5px]"><b>Hint:</b> {c.hint}</p>
-                : <button className="text-[14px] font-semibold text-kelp underline-offset-4 hover:underline" onClick={() => setShowHint(true)}>Show hint</button>}
+          {c.hints.length > 0 && (
+            <div className="mt-6">
+              <p className="label">Hints</p>
+              <ul className="space-y-2">
+                {c.hints.map((h, i) => (
+                  <li key={i}>
+                    {opened.has(i) ? (
+                      <motion.div initial={{ rotateX: 90, opacity: 0 }} animate={{ rotateX: 0, opacity: 1 }} className="rounded-xl bg-aqua-200 px-4 py-3 text-[14.5px]">
+                        <b>Hint {i + 1}:</b> {h.text}
+                        <span className="mt-1 block text-[12.5px] text-deep/60">Opened by {opener(i)}{h.cost ? `, cost ${h.cost} points` : ""}</span>
+                      </motion.div>
+                    ) : confirmHint === i ? (
+                      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-coral/40 bg-coral-100/50 px-4 py-3 text-[14px]">
+                        <span className="flex-1">{h.cost ? <>Take <b>{h.cost} points</b> off your team's score to open hint {i + 1}? Everyone on your team will see it.</> : <>Open hint {i + 1}? It's free.</>}</span>
+                        <button className="btn btn-sm btn-kelp" onClick={() => openHint(i)}>Open hint</button>
+                        <button className="btn btn-sm btn-line" onClick={() => setConfirmHint(null)}>Keep it closed</button>
+                      </div>
+                    ) : (
+                      <button className="flex w-full items-center justify-between gap-3 rounded-xl border border-dashed border-fin-200 px-4 py-3 text-left text-[14px] hover:border-deep/40 disabled:opacity-50"
+                        disabled={!!solve || clockState.status !== "live"} onClick={() => setConfirmHint(i)}>
+                        <span className="font-semibold">Hint {i + 1} (locked)</span>
+                        <span className={`chip ${h.cost ? "bg-coral-100 text-coral" : "bg-kelp-100 text-kelp-600"}`}>{h.cost ? `Costs ${h.cost} points` : "Free"}</span>
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
           <div className="relative mt-7 border-t border-fin-200/70 pt-6">
@@ -91,6 +135,8 @@ function ChallengeModal({ c, onClose }: { c: Challenge | null; onClose: () => vo
               </motion.p>
             ) : clockState.status !== "live" ? (
               <p className="rounded-2xl bg-foam px-4 py-3 text-[15px] text-deep/70">{clockState.status === "ended" ? "Time's up. Flags can no longer be submitted." : "Flags open when the 3-hour clock starts."}</p>
+            ) : left <= 0 ? (
+              <p className="rounded-2xl bg-coral-100/60 px-4 py-3 text-[15px] text-deep/80"><b>Out of attempts.</b> Your team used all {c.maxAttempts} on this one. An organiser can add more if they choose.</p>
             ) : (
               <form onSubmit={submit} className="flex flex-col gap-3 sm:flex-row">
                 <label htmlFor="flag" className="sr-only">Flag</label>
@@ -105,8 +151,16 @@ function ChallengeModal({ c, onClose }: { c: Challenge | null; onClose: () => vo
                   role="status" className={`mt-3 text-[14px] font-medium ${msg.tone === "ok" ? "text-kelp" : "text-coral"}`}>{msg.text}</motion.p>
               )}
             </AnimatePresence>
-            {!solve && attempts > 0 && <p className="mt-2 text-[13px] text-deep/55">Your team has tried {attempts} wrong flag{attempts === 1 ? "" : "s"} here.</p>}
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[13px] text-deep/60">
+              <span>
+                {!solve && (c.maxAttempts > 0
+                  ? <><b className={left <= 2 ? "text-coral" : "text-deep"}>{Math.max(0, left)} of {c.maxAttempts}</b> attempts left for your team</>
+                  : attempts > 0 ? `Your team has tried ${attempts} wrong flag${attempts === 1 ? "" : "s"} here. Unlimited attempts.` : "Unlimited attempts")}
+              </span>
+              <button type="button" className="underline-offset-4 hover:underline" onClick={toggleMute} aria-pressed={muted}>{muted ? "Sound off" : "Sound on"}</button>
+            </div>
           </div>
+          <FaaahPopup trigger={faaah} />
         </div>
       )}
     </Modal>
@@ -115,6 +169,9 @@ function ChallengeModal({ c, onClose }: { c: Challenge | null; onClose: () => vo
 
 function Card({ c, solved, solvedBy, onOpen, fresh }: { c: Challenge; solved: boolean; solvedBy: number; onOpen: () => void; fresh: boolean }) {
   const db = useDB();
+  const user = useUser()!;
+  const left = attemptsLeft(db, user.teamId!, c);
+  const opened = unlockedHints(db, user.teamId!, c.id).size;
   const type = db.types.find((t) => t.id === c.typeId);
   const th = THEME_INFO[c.theme];
   return (
@@ -138,6 +195,12 @@ function Card({ c, solved, solvedBy, onOpen, fresh }: { c: Challenge; solved: bo
           {solved ? <span className="inline-flex items-center gap-1.5 font-semibold text-kelp-600"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="m5 12 5 5L20 7" /></svg>Solved by your team</span>
             : `${solvedBy} team${solvedBy === 1 ? "" : "s"} solved`}
         </span>
+        {!solved && (c.hints.length > 0 || c.maxAttempts > 0) && (
+          <span className="mt-2 flex flex-wrap gap-1.5 text-[12px]">
+            {c.hints.length > 0 && <span className="chip bg-aqua-200/70 text-deep/75">{opened}/{c.hints.length} hints open</span>}
+            {c.maxAttempts > 0 && <span className={`chip ${left <= 0 ? "bg-coral text-white" : left <= 2 ? "bg-coral-100 text-coral" : "bg-foam text-deep/70"}`}>{left <= 0 ? "No attempts left" : `${left} attempt${left === 1 ? "" : "s"} left`}</span>}
+          </span>
+        )}
       </span>
       {fresh && !solved && <span className="absolute right-3 top-3 rounded-full bg-coral px-2 py-0.5 text-[11px] font-bold text-white">New</span>}
     </button>

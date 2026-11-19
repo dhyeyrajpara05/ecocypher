@@ -58,7 +58,7 @@ export default function Dashboard() {
   const kpis: [string, string | number, string, string][] = [
     ["Teams", db.teams.length, `${players.length} players`, "#1E5B7A"],
     ["Active now", `${active}/${db.teams.length}`, "teams submitting in the last 15 min", "#1F7A5C"],
-    ["Solves", s.length, `${accuracy}% of submissions correct`, "#B88A1F"],
+    ["Solves", s.length, `${accuracy}% correct, ${db.hintUnlocks.length} hints opened`, "#B88A1F"],
     ["Challenges live", live.length, `${scheduled.length} scheduled, ${drafts.length} drafts`, "#8E4B7A"],
   ];
 

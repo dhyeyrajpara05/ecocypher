@@ -37,3 +37,11 @@
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+
+/* wrong-flag meme text */
+.faaah {
+  -webkit-text-stroke: 3px #0E2A3B;
+  paint-order: stroke fill;
+  text-shadow: 6px 6px 0 #0E2A3B;
+  letter-spacing: -0.02em;
+}

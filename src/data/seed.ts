@@ -3,7 +3,7 @@
 // Demo flags are NOT in this file: only their salted PBKDF2 hashes are, so the public repo and the
 // built site never reveal them. The organisers keep the demo flags separately.
 import { hashPassword, randomSalt } from "./crypto";
-import type { Challenge, DB, Submission, ThemeKey, User } from "./types";
+import type { Challenge, DB, Hint, Submission, ThemeKey, User } from "./types";
 
 export const DEMO_ADMIN = { username: "admin", password: "EcoCypher@2026" };
 export const DEMO_PLAYER_PASSWORD = "dive-in-2026";
@@ -29,7 +29,7 @@ export async function makeUser(p: Omit<User, "passwordHash" | "passwordSalt" | "
 
 export function emptyDB(): DB {
   return {
-    version: 2,
+    version: 3,
     demo: false,
     settings: {
       eventName: "EcoCypher",
@@ -53,6 +53,7 @@ export function emptyDB(): DB {
     waves: [],
     challenges: [],
     submissions: [],
+    hintUnlocks: [],
     notifications: [],
   };
 }
@@ -70,22 +71,26 @@ export async function demoDB(): Promise<DB> {
   db.settings.startsAt = iso(-110);
   db.settings.endsAt = iso(180 - 110);
   db.waves = [{ id: "w1", number: 1, createdAt: iso(-110) }];
-  const ch = (id: string, waveId: string | null, typeId: string, theme: ThemeKey, title: string, points: number, releaseIn: number | null, description: string, hint = ""): Challenge => {
+  const ch = (id: string, waveId: string | null, typeId: string, theme: ThemeKey, title: string, points: number, releaseIn: number | null, description: string, hints: Hint[] = [], maxAttempts = 0): Challenge => {
     const [flagSalt, flagHash] = DEMO_FLAG_HASHES[id];
-    return { id, waveId, typeId, theme, title, points, description, hint, flagSalt, flagHash, caseSensitive: false, files: [], hidden: false,
+    return { id, waveId, typeId, theme, title, points, description, hints, maxAttempts, flagSalt, flagHash, caseSensitive: false, files: [], hidden: false,
       releaseAt: releaseIn === null ? null : iso(releaseIn), createdAt: iso(-120) };
   };
   db.challenges = [
     ch("c1", "w1", "type-3", "plastics", "The Receipt Trail", 100, -110,
-      "Procurement says campus went plastic-free in January. The canteen receipts say otherwise.\n\nHow many plastic straws were bought in March? Submit as ECO{straw-<number>}.", "Look at the unit, not just the quantity."),
+      "Procurement says campus went plastic-free in January. The canteen receipts say otherwise.\n\nHow many plastic straws were bought in March? Submit as ECO{straw-<number>}.",
+      [{ text: "Look at the unit, not just the quantity.", cost: 10 }, { text: "A box holds 40 straws.", cost: 30 }], 10),
     ch("c2", "w1", "type-1", "ewaste", "Who Runs the Recycler?", 150, -110,
-      "Three companies share the name Oakhollow. Only one could have shipped the campus e-waste.\n\nSubmit its registration number as ECO{number}."),
+      "Three companies share the name Oakhollow. Only one could have shipped the campus e-waste.\n\nSubmit its registration number as ECO{number}.",
+      [{ text: "A company that no longer exists can't ship anything.", cost: 15 }], 5),
     ch("c3", "w1", "type-4", "plastics", "Smudged Memo", 80, -110,
-      "A memo left in the photocopier reads: IPUZ-VU-ABLZKHF. The sender liked shifting things by seven.\n\nSubmit as ECO{...} in lower case with hyphens."),
+      "A memo left in the photocopier reads: IPUZ-VU-ABLZKHF. The sender liked shifting things by seven.\n\nSubmit as ECO{...} in lower case with hyphens.",
+      [{ text: "Shift each letter back by seven.", cost: 20 }], 8),
     ch("c4", "w1", "type-2", "water", "Night Shift Load", 200, -110,
       "The pump house log mixes two timestamp formats. Which pump started most often at night, and how many times?\n\nSubmit as ECO{pump-<n>_<count>}."),
     ch("c5", "w1", "type-3", "water", "Meter Never Lies", 250, -110,
-      "Hauliers bill by the kilolitre. Gauges say what arrived. Find the gap in kilolitres."),
+      "Hauliers bill by the kilolitre. Gauges say what arrived. Find the gap in kilolitres.",
+      [{ text: "Duplicate gauge rows count once.", cost: 25 }, { text: "Ignore the haulier in the estates memo.", cost: 40 }], 6),
     ch("c7", null, "type-2", "food", "Takeaway Tally", 120, -40,
       "The canteens swear they switched to leaf boxes. The waste audit says otherwise. How many kilograms of plastic boxes left campus last month? Submit as ECO{<n>kg}."),
     ch("c6", null, "type-1", "ewaste", "Ship Spotting", 300, 25, "A container left the port with campus e-waste inside. Which one?"),
@@ -114,6 +119,10 @@ export async function demoDB(): Promise<DB> {
     sub("t2", 2, "c1", -98), sub("t2", 1, "c2", -80, false), sub("t2", 1, "c2", -78), sub("t2", 3, "c3", -70), sub("t2", 2, "c5", -12),
     sub("t3", 1, "c3", -105), sub("t3", 2, "c1", -90), sub("t3", 3, "c2", -60), sub("t3", 1, "c4", -15),
     sub("t4", 3, "c1", -86), sub("t4", 1, "c3", -81, false), sub("t4", 2, "c3", -64),
+  ];
+  db.hintUnlocks = [
+    { id: "h1", teamId: "t4", userId: "t4-u3", challengeId: "c1", index: 0, cost: 10, at: iso(-88) },
+    { id: "h2", teamId: "t2", userId: "t2-u1", challengeId: "c5", index: 0, cost: 15, at: iso(-82) },
   ];
   db.notifications = [
     { id: "n1", title: "New challenge live", body: "Takeaway Tally (120 points) is now open. Another single challenge drops in about 25 minutes.", level: "info", at: iso(-40) },

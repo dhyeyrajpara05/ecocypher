@@ -34,6 +34,20 @@ export function solves(db: DB, until?: Date): Submission[] {
   return out;
 }
 
+/** Wrong guesses a team has made on a challenge. */
+export function wrongAttempts(db: DB, teamId: string, challengeId: string): number {
+  return db.submissions.filter((s) => s.teamId === teamId && s.challengeId === challengeId && !s.correct).length;
+}
+
+/** Attempts left for a team, or Infinity when the challenge has no limit. */
+export function attemptsLeft(db: DB, teamId: string, c: Challenge): number {
+  return c.maxAttempts > 0 ? Math.max(0, c.maxAttempts - wrongAttempts(db, teamId, c.id)) : Infinity;
+}
+
+export function unlockedHints(db: DB, teamId: string, challengeId: string): Set<number> {
+  return new Set(db.hintUnlocks.filter((h) => h.teamId === teamId && h.challengeId === challengeId).map((h) => h.index));
+}
+
 /**
  * Team scoreboard.
  *  - Each challenge is worth its own points, awarded once per team, credited to the member who solved it.
@@ -47,26 +61,33 @@ export function scoreboard(db: DB, opts: { until?: Date } = {}): ScoreRow[] {
   for (const t of db.teams) {
     const members = db.users.filter((u) => u.teamId === t.id && u.role === "player")
       .map((u) => ({ userId: u.id, name: u.displayName, points: 0, solves: 0 }));
-    rows.set(t.id, { rank: 0, teamId: t.id, teamName: t.name, score: 0, solves: 0, lastSolveAt: null, members, history: [] });
+    rows.set(t.id, { rank: 0, teamId: t.id, teamName: t.name, score: 0, solves: 0, hintCost: 0, lastSolveAt: null, members, history: [] });
   }
-  for (const s of solves(db, opts.until)) {
-    const row = rows.get(s.teamId);
-    const p = pts.get(s.challengeId);
-    if (!row || p === undefined) continue;
-    row.score += p;
+  // Solves add points; opened hints take points away from the team. Both move the "reached this score" time.
+  const cutoff = opts.until ? opts.until.getTime() : Infinity;
+  const events = [
+    ...solves(db, opts.until).map((s) => ({ kind: "solve" as const, at: s.at, teamId: s.teamId, userId: s.userId, delta: pts.get(s.challengeId) })),
+    ...(db.hintUnlocks ?? []).filter((h) => Date.parse(h.at) <= cutoff && h.cost > 0).map((h) => ({ kind: "hint" as const, at: h.at, teamId: h.teamId, userId: h.userId, delta: -h.cost })),
+  ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  for (const e of events) {
+    const row = rows.get(e.teamId);
+    if (!row || e.delta === undefined) continue;
+    row.score += e.delta;
+    row.lastSolveAt = e.at;
+    row.history.push({ at: e.at, score: row.score });
+    if (e.kind === "hint") { row.hintCost -= e.delta; continue; }
     row.solves += 1;
-    row.lastSolveAt = s.at;
-    row.history.push({ at: s.at, score: row.score });
-    let m = row.members.find((x) => x.userId === s.userId);
+    let m = row.members.find((x) => x.userId === e.userId);
     if (!m) {
-      m = { userId: s.userId, name: userName.get(s.userId) ?? "Former member", points: 0, solves: 0 };
+      m = { userId: e.userId, name: userName.get(e.userId) ?? "Former member", points: 0, solves: 0 };
       row.members.push(m);
     }
-    m.points += p;
+    m.points += e.delta;
     m.solves += 1;
   }
   const list = [...rows.values()].sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
+    if (!a.solves !== !b.solves) return a.solves ? -1 : 1;
     if (a.lastSolveAt && b.lastSolveAt) return Date.parse(a.lastSolveAt) - Date.parse(b.lastSolveAt);
     if (a.lastSolveAt) return -1;
     if (b.lastSolveAt) return 1;

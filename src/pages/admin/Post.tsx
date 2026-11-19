@@ -10,12 +10,12 @@ import { downloadText, fromLocalInput } from "../../lib/format";
 import { PageHead } from "./Admin";
 import { ChallengeFields, blankChallenge } from "./ChallengeFields";
 
-const TEMPLATE = `title,type,theme,points,flag,description,hint,files
-"Bin Day",OSINT,plastics,100,ECO{replace-me-1},"Which photo was taken at the loading dock?","Photos remember more than they show",photos.zip|files/photos.zip
-"Power Down",Python,energy,150,ECO{replace-me-2},"Which meter lies?",,
-"Every Drop",Data & SQL,water,150,ECO{replace-me-3},"Find the haulier that billed for water never delivered.",,
-"Dead Circuits",OSINT,ewaste,200,ECO{replace-me-4},"Which company shipped the laptops?",,
-"Last Plate",Crypto,food,250,ECO{replace-me-5},"Decode the canteen memo.",,
+const TEMPLATE = `title,type,theme,points,flag,description,hint,hint_cost,attempts,files
+"Bin Day",OSINT,plastics,100,ECO{replace-me-1},"Which photo was taken at the loading dock?","Photos remember more than they show",10,10,photos.zip|files/photos.zip
+"Power Down",Python,energy,150,ECO{replace-me-2},"Which meter lies?",,,0,
+"Every Drop",Data & SQL,water,150,ECO{replace-me-3},"Find the haulier that billed for water never delivered.","Duplicate rows count once",20,8,
+"Dead Circuits",OSINT,ewaste,200,ECO{replace-me-4},"Which company shipped the laptops?",,,5,
+"Last Plate",Crypto,food,250,ECO{replace-me-5},"Decode the canteen memo.",,,0,
 `;
 
 type When = "now" | "schedule" | "draft";

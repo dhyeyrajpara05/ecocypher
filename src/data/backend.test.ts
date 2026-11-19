@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { LocalBackend, parseCSV, type ChallengeInput } from "./backend";
+import { LocalBackend, migrate, parseCSV, type ChallengeInput } from "./backend";
 import { DEMO_ADMIN, DEMO_PLAYER_PASSWORD } from "./seed";
-import { releaseStatus, scoreboard, visibleChallenges } from "./scoring";
+import { attemptsLeft, releaseStatus, scoreboard, visibleChallenges } from "./scoring";
 import type { Cipher } from "./vault";
 import type { DB } from "./types";
 
@@ -16,7 +16,7 @@ class MemStorage implements Storage {
 }
 
 const input = (title: string, flag: string, points = 100): ChallengeInput =>
-  ({ typeId: "type-1", theme: "water", title, description: "d", points, flag, caseSensitive: false, files: [], hint: "", hidden: false });
+  ({ typeId: "type-1", theme: "water", title, description: "d", points, flag, caseSensitive: false, files: [], hints: [], maxAttempts: 0, hidden: false });
 
 let be: LocalBackend;
 beforeEach(async () => { be = new LocalBackend(new MemStorage()); await be.ready(); });
@@ -83,12 +83,65 @@ describe("flags", () => {
   });
   it("rate-limits rapid guessing", async () => {
     await be.loginMember("t4", "t4-u2", DEMO_PLAYER_PASSWORD);
-    for (let i = 0; i < 10; i++) await be.submitFlag("c5", `ECO{${i}}`);
-    expect((await be.submitFlag("c5", "ECO{x}")).message).toMatch(/Too many/);
+    for (let i = 0; i < 10; i++) await be.submitFlag("c7", `ECO{${i}}`);
+    expect((await be.submitFlag("c7", "ECO{x}")).message).toMatch(/Too many/);
   }, 30_000);
   it("players cannot use admin actions", async () => {
     await be.loginMember("t1", "t1-u1", DEMO_PLAYER_PASSWORD);
     expect(() => be.startTimer()).toThrow(/Only admins/);
+  });
+});
+
+describe("attempts and hints", () => {
+  const live = () => new Date(Date.now() - 1000).toISOString();
+  async function limited(max: number) {
+    await asAdmin();
+    await be.saveChallenge(null, { ...input("Limited", "ECO{right}", 200), maxAttempts: max,
+      hints: [{ text: "Free nudge", cost: 0 }, { text: "Big clue", cost: 50 }] }, live());
+    const id = be.db().challenges.find((c) => c.title === "Limited")!.id;
+    be.logout();
+    return id;
+  }
+  it("stops a team after its wrong attempts run out, shared across members", async () => {
+    const id = await limited(2);
+    await be.loginMember("t4", "t4-u1", DEMO_PLAYER_PASSWORD);
+    await be.submitFlag(id, "ECO{a}");
+    be.logout(); await be.loginMember("t4", "t4-u2", DEMO_PLAYER_PASSWORD);
+    await be.submitFlag(id, "ECO{b}");
+    const r = await be.submitFlag(id, "ECO{right}");
+    expect(r.correct).toBe(false);
+    expect(r.message).toMatch(/used all its attempts/);
+    be.logout(); await be.loginMember("t3", "t3-u1", DEMO_PLAYER_PASSWORD);
+    expect((await be.submitFlag(id, "ECO{right}")).correct).toBe(true);   // other teams unaffected
+  }, 30_000);
+  it("lets an admin add attempts to an existing challenge", async () => {
+    const id = await limited(1);
+    await be.loginMember("t4", "t4-u1", DEMO_PLAYER_PASSWORD);
+    await be.submitFlag(id, "ECO{a}");
+    expect(attemptsLeft(be.db(), "t4", be.db().challenges.find((c) => c.id === id)!)).toBe(0);
+    be.logout(); await asAdmin(); be.addAttempts(id, 3); be.logout();
+    await be.loginMember("t4", "t4-u1", DEMO_PLAYER_PASSWORD);
+    expect((await be.submitFlag(id, "ECO{right}")).correct).toBe(true);
+  }, 30_000);
+  it("charges the team once for a hint and shows it to the whole team", async () => {
+    const id = await limited(0);
+    const before = scoreboard(be.db()).find((r) => r.teamId === "t4")!.score;
+    await be.loginMember("t4", "t4-u1", DEMO_PLAYER_PASSWORD);
+    expect(be.unlockHint(id, 1).text).toBe("Big clue");
+    be.logout(); await be.loginMember("t4", "t4-u2", DEMO_PLAYER_PASSWORD);
+    be.unlockHint(id, 1);                                                  // already open: no second charge
+    const row = scoreboard(be.db()).find((r) => r.teamId === "t4")!;
+    expect(row.score).toBe(before - 50);
+    expect(row.hintCost).toBe(60);                                         // includes the demo hint
+    expect(() => be.unlockHint(id, 9)).toThrow(/doesn't exist/);
+  });
+  it("upgrades data saved by the previous version", () => {
+    const old = { version: 2, challenges: [{ id: "x", hint: "old hint" }, { id: "y", hint: "" }] };
+    const m = migrate(old)!;
+    expect(m.version).toBe(3);
+    expect(m.challenges[0].hints).toEqual([{ text: "old hint", cost: 0 }]);
+    expect(m.challenges[1].hints).toEqual([]);
+    expect(m.hintUnlocks).toEqual([]);
   });
 });
 
