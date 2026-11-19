@@ -5,5 +5,5 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   base: process.env.BASE_PATH ?? "/ecocypher/",
   plugins: [react()],
-  test: { environment: "jsdom" },
+  test: { environment: "node" },
 } as any);
