@@ -1,7 +1,8 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AgentNotice } from "../components/AgentNotice";
-import { FaaahPopup, playFaaah, useMute } from "../components/Faaah";
+import { DealPopup, playDeal } from "../components/Deal";
+import { FaaahPopup, playFaaah, preloadFaaah, useMute } from "../components/Faaah";
 import { BigTimer, Footer, useEventClock } from "../components/chrome";
 import { SiteHeader } from "../components/SiteHeader";
 import { THEME_INFO, ThemeArt } from "../components/themes";
@@ -38,6 +39,9 @@ function ChallengeModal({ c, onClose }: { c: Challenge | null; onClose: () => vo
   const [confirmHint, setConfirmHint] = useState<number | null>(null);
   const [celebrate, setCelebrate] = useState(0);
   const [faaah, setFaaah] = useState(0);
+  const [won, setWon] = useState(0);
+  const [wonPoints, setWonPoints] = useState(0);
+  useEffect(() => { if (c) preloadFaaah(); }, [c]);
   const [muted, toggleMute] = useMute();
   const type = db.types.find((t) => t.id === c?.typeId);
   const wave = db.waves.find((w) => w.id === c?.waveId);
@@ -70,7 +74,7 @@ function ChallengeModal({ c, onClose }: { c: Challenge | null; onClose: () => vo
     const r = await be.submitFlag(c.id, flag);
     setBusy(false);
     setMsg({ tone: r.correct ? "ok" : "bad", text: r.message });
-    if (r.correct && !r.alreadySolved) { setCelebrate((x) => x + 1); setFlag(""); toast(`${c.title}: +${r.points} points for your team`, "ok"); }
+    if (r.correct && !r.alreadySolved) { setCelebrate((x) => x + 1); setFlag(""); setWonPoints(r.points ?? c.points); setWon((x) => x + 1); playDeal(); toast(`${c.title}: +${r.points} points for your team`, "ok"); }
     if (r.ok && !r.correct) { setFaaah((x) => x + 1); playFaaah(); }
   }
 
@@ -161,6 +165,7 @@ function ChallengeModal({ c, onClose }: { c: Challenge | null; onClose: () => vo
             </div>
           </div>
           <FaaahPopup trigger={faaah} />
+          <DealPopup trigger={won} points={wonPoints} title={c.title} />
         </div>
       )}
     </Modal>

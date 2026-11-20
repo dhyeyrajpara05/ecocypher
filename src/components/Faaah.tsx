@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const MUTE_KEY = "ecocypher:muted";
 
@@ -23,8 +23,25 @@ let ctx: AudioContext | null = null;
  * A synthesised, falling "FAAAAAH": a breathy "f", then a sawtooth voice through two vowel
  * formants that slides down an octave and a half with a wobble. No audio file needed.
  */
+let clip: HTMLAudioElement | null = null;
+
+/** Plays the "FAAAAH" sound file. Falls back to a synthesised version if the file can't play. */
 export function playFaaah() {
   if (isMuted()) return;
+  try {
+    clip ??= new Audio(`${import.meta.env.BASE_URL}sounds/faaah.mp3`);
+    clip.currentTime = 0;
+    clip.volume = 0.9;
+    void clip.play().catch(synthFaaah);
+  } catch { synthFaaah(); }
+}
+
+/** Warms up the sound file so the first wrong flag plays instantly. */
+export function preloadFaaah() {
+  try { clip ??= new Audio(`${import.meta.env.BASE_URL}sounds/faaah.mp3`); clip.preload = "auto"; } catch { /* no audio */ }
+}
+
+function synthFaaah() {
   try {
     const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     ctx ??= new AC();
@@ -112,15 +129,25 @@ const QUIPS = [
   "I'm out. — every shark, just now",
 ];
 
-/** Big shaking "FAAAAAA!!!!!!!!" pop-up shown on a wrong flag. Re-triggers whenever `trigger` changes. */
+/** Calls `fn` only when `trigger` goes up after the component has mounted, never on (re)mount. */
+export function useOnBump(trigger: number, fn: () => void | (() => void)) {
+  const last = useRef(trigger);
+  useEffect(() => {
+    if (trigger <= last.current) { last.current = trigger; return; }
+    last.current = trigger;
+    return fn();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trigger]);
+}
+
+/** Big shaking "FAAAAAA!!!!!!!!" pop-up, shown once per wrong flag. */
 export function FaaahPopup({ trigger }: { trigger: number }) {
   const [show, setShow] = useState(false);
-  useEffect(() => {
-    if (!trigger) return;
+  useOnBump(trigger, () => {
     setShow(true);
-    const id = setTimeout(() => setShow(false), 1900);
+    const id = setTimeout(() => setShow(false), 2200);
     return () => clearTimeout(id);
-  }, [trigger]);
+  });
   const quip = QUIPS[trigger % QUIPS.length];
   return (
     <AnimatePresence>
