@@ -79,3 +79,13 @@ describe("server", () => {
     expect(titles).toEqual(expect.arrayContaining(["One", "Two"]));
   }, 30_000);
 });
+
+describe("database settings", () => {
+  it("finds the Upstash keys whatever prefix Vercel gave them", async () => {
+    const { kvFromEnv, UpstashKV } = await import("./kv");
+    const kv = kvFromEnv({ STORAGE_KV_REST_API_URL: "https://x.upstash.io", STORAGE_KV_REST_API_READ_ONLY_TOKEN: "ro", STORAGE_KV_REST_API_TOKEN: "rw" });
+    expect(kv).toBeInstanceOf(UpstashKV);
+    expect((kv as unknown as { token: string }).token).toBe("rw");
+    expect(() => kvFromEnv({})).toThrow(/No database/);
+  });
+});

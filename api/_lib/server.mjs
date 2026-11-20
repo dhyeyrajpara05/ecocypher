@@ -1092,9 +1092,18 @@ var UpstashKV = class {
   }
 };
 function kvFromEnv(env) {
-  const url = env.KV_REST_API_URL ?? env.UPSTASH_REDIS_REST_URL;
-  const token = env.KV_REST_API_TOKEN ?? env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) throw new Error("No database connected. In Vercel, add Upstash Redis from the Storage tab.");
+  const find = (...ends) => {
+    for (const end of ends) {
+      const exact = env[end];
+      if (exact) return exact;
+      const key = Object.keys(env).sort().find((k) => k.endsWith(`_${end}`) && !k.includes("READ_ONLY") && env[k]);
+      if (key) return env[key];
+    }
+    return void 0;
+  };
+  const url = find("KV_REST_API_URL", "REST_API_URL", "UPSTASH_REDIS_REST_URL", "REDIS_REST_URL");
+  const token = find("KV_REST_API_TOKEN", "REST_API_TOKEN", "UPSTASH_REDIS_REST_TOKEN", "REDIS_REST_TOKEN");
+  if (!url || !token) throw new Error("No database connected. In Vercel, add Upstash Redis from the Storage tab, then redeploy.");
   return new UpstashKV(url, token);
 }
 
