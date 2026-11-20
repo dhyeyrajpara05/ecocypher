@@ -10,6 +10,7 @@ createServer(async (req, res) => {
   for await (const chunk of req) body += chunk;
   const url = new URL(req.url ?? "/", "http://localhost");
   const out = await handle(kv, env, { method: req.method ?? "GET", path: url.pathname, query: url.searchParams, auth: req.headers.authorization ?? null, body });
+  if (out.raw) { res.writeHead(200, { "Content-Type": out.raw.mime, "Cache-Control": "public, max-age=31536000" }); res.end(Buffer.from(out.raw.bytes)); return; }
   res.writeHead(out.status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
   res.end(out.body === undefined ? "" : JSON.stringify(out.body));
 }).listen(8787, () => console.log("EcoCypher API on http://localhost:8787 (in-memory, demo data)"));

@@ -108,6 +108,39 @@ describe("server", () => {
   }, 30_000);
 });
 
+describe("soundboard on the server", () => {
+  it("keeps uploaded audio out of the polled data and serves it on its own", async () => {
+    const a = await adminToken();
+    const audio = "data:audio/mpeg;base64," + btoa("ID3" + "x".repeat(3000));
+    const up = await call(a, "uploadSound", "airhorn.mp3", audio);
+    expect(up.status).toBe(200);
+    const meta = up.body.result as { id: string };
+    expect(JSON.stringify(up.body.view)).not.toContain(audio.slice(30, 60));            // not in the view
+    expect(JSON.stringify((await state(null)).body.view)).not.toContain("eHh4eHh4");
+    const { getSound } = await import("./engine");
+    const s = await getSound(kv, meta.id);
+    expect(s.status).toBe(200);
+    expect(s.mime).toBe("audio/mpeg");
+    const p = await playerToken();
+    expect((await call(p, "uploadSound", "x", audio)).status).toBe(403);
+    expect((await call(a, "deleteSound", meta.id)).status).toBe(200);
+    expect((await getSound(kv, meta.id)).status).toBe(404);
+  }, 30_000);
+});
+
+describe("upgrading live data", () => {
+  it("serves data saved by the previous version without an admin action first", async () => {
+    const old = JSON.parse(JSON.stringify((await state(null)).body.view));    // just to make sure the DB exists
+    expect(old).toBeTruthy();
+    const raw = JSON.parse(kv.data!);
+    delete raw.soundboard; raw.version = 3;
+    kv.data = JSON.stringify(raw);
+    const v = (await state(null)).body.view;
+    expect(v.version).toBe(4);
+    expect(v.soundboard.cues.lastAttempt.sound).toBe("builtin:abhi-maza");
+  }, 30_000);
+});
+
 describe("database settings", () => {
   it("finds the Upstash keys whatever prefix Vercel gave them", async () => {
     const { kvFromEnv, UpstashKV } = await import("./kv");

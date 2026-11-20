@@ -77,8 +77,21 @@ export interface Challenge {
   hidden: boolean;
   /** null = draft (never shown to players). Players see it from this moment. */
   releaseAt: string | null;
+  /** Meme sound/pop-up overrides for this challenge. Missing keys use the event defaults. */
+  cues?: Partial<Record<CueKey, Cue>>;
   createdAt: string;
 }
+
+/** The moments that can play a meme sound and pop-up. */
+export type CueKey = "wrong" | "lastAttempt" | "outOfAttempts" | "correct";
+/**
+ * What happens at one moment. `sound` is "none", "builtin:<name>" or "upload:<id>".
+ * `text` is the big pop-up line (empty = the built-in line). `seconds` stops long clips early.
+ */
+export interface Cue { sound: string; text: string; seconds: number }
+/** An admin-uploaded sound. The audio itself is stored separately and fetched on demand. */
+export interface SoundMeta { id: string; name: string; bytes: number; mime: string; addedAt: string }
+export interface Soundboard { cues: Record<CueKey, Cue>; sounds: SoundMeta[] }
 
 export interface Submission {
   id: string;
@@ -114,7 +127,8 @@ export interface Settings {
 }
 
 export interface DB {
-  version: 3;
+  version: 4;
+  soundboard: Soundboard;
   settings: Settings;
   users: User[];
   teams: Team[];

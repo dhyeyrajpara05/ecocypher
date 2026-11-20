@@ -3,6 +3,7 @@
 // Demo flags are NOT in this file: only their salted PBKDF2 hashes are, so the public repo and the
 // built site never reveal them. The organisers keep the demo flags separately.
 import { hashPassword, randomSalt } from "./crypto";
+import { defaultSoundboard } from "./sounds";
 import type { Challenge, DB, Hint, Submission, ThemeKey, User } from "./types";
 
 export const DEMO_ADMIN = { username: "admin", password: "EcoCypher@2026" };
@@ -29,7 +30,8 @@ export async function makeUser(p: Omit<User, "passwordHash" | "passwordSalt" | "
 
 export function emptyDB(): DB {
   return {
-    version: 3,
+    version: 4,
+    soundboard: defaultSoundboard(),
     demo: false,
     settings: {
       eventName: "EcoCypher",

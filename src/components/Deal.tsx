@@ -60,7 +60,7 @@ function Burst() {
 }
 
 /** Full-screen "DEAL!" celebration, shown once per correct flag. */
-export function DealPopup({ trigger, points, title }: { trigger: number; points: number; title: string }) {
+export function DealPopup({ trigger, points, title, text }: { trigger: number; points: number; title: string; text?: string }) {
   const [show, setShow] = useState(false);
   const reduce = useReducedMotion();
   useOnBump(trigger, () => {
@@ -85,7 +85,7 @@ export function DealPopup({ trigger, points, title }: { trigger: number; points:
             <motion.div className="relative rounded-[28px] border-[6px] border-kelp-600 bg-white px-10 py-5 shadow-[10px_10px_0_#0B2A3C]"
               initial={{ scale: 3, rotate: -18, opacity: 0 }} animate={{ scale: [3, 0.92, 1], rotate: [-18, -6, -8], opacity: 1 }}
               transition={{ duration: 0.45, times: [0, 0.75, 1], ease: "easeIn" }}>
-              <p className="font-display text-[clamp(56px,13vw,132px)] font-black leading-none tracking-tight text-kelp-600">DEAL!</p>
+              <p className="font-display text-[clamp(56px,13vw,132px)] font-black leading-none tracking-tight text-kelp-600">{text?.trim() || "DEAL!"}</p>
             </motion.div>
             <motion.p className="mt-6 font-display text-[clamp(28px,6vw,52px)] font-black text-brass drop-shadow-[3px_3px_0_#0B2A3C]"
               initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.4, type: "spring", stiffness: 300, damping: 14 }}>

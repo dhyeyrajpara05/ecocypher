@@ -1,6 +1,9 @@
 import { THEME_INFO, ThemeArt } from "../../components/themes";
 import { THEMES, type ChallengeInput } from "../../data/backend";
+import { useState } from "react";
+import { CUE_KEYS, CUE_LABELS } from "../../data/sounds";
 import { useDB } from "../../data/store";
+import { CueEditor, usePreview } from "./Soundboard";
 
 export function blankChallenge(typeId: string): ChallengeInput {
   return { typeId, theme: "plastics", title: "", description: "", points: 100, flag: "", caseSensitive: false, files: [], hints: [], maxAttempts: 0, hidden: false };
@@ -62,6 +65,34 @@ export function ChallengeFields({ value, onChange, idPrefix, editing = false }: 
         ))}
         <button type="button" className="btn btn-line btn-sm" onClick={() => set("files", [...value.files, { name: "", url: "" }])}>Add a file link</button>
       </div>
+      <MemeSounds value={value} onChange={onChange} idPrefix={idPrefix} />
+    </div>
+  );
+}
+
+/** Per-challenge meme sounds. Collapsed by default; every moment follows the event default unless changed. */
+function MemeSounds({ value, onChange, idPrefix }: { value: ChallengeInput; onChange: (v: ChallengeInput) => void; idPrefix: string }) {
+  const custom = CUE_KEYS.filter((k) => value.cues?.[k]).length;
+  const [open, setOpen] = useState(custom > 0);
+  const { preview, popups } = usePreview();
+  return (
+    <div className="sm:col-span-6">
+      <button type="button" className="flex w-full items-center justify-between rounded-xl border border-fin-200 px-4 py-3 text-left text-[14px]" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <span><b>Meme sounds</b> <span className="text-deep/60">{custom ? `${custom} custom for this challenge` : "using the Soundboard defaults"}</span></span>
+        <svg className={`transition-transform ${open ? "rotate-180" : ""}`} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" /></svg>
+      </button>
+      {open && (
+        <div className="mt-3 space-y-4 rounded-xl bg-foam p-4">
+          {CUE_KEYS.map((k) => (
+            <div key={k}>
+              <p className="mb-1.5 text-[13.5px] font-semibold">{CUE_LABELS[k].title}</p>
+              <CueEditor k={k} idPrefix={idPrefix} allowDefault value={value.cues?.[k]} onPreview={(c) => preview(k, c)}
+                onChange={(c) => { const cues = { ...(value.cues ?? {}) }; if (c) cues[k] = c; else delete cues[k]; onChange({ ...value, cues }); }} />
+            </div>
+          ))}
+        </div>
+      )}
+      {popups}
     </div>
   );
 }

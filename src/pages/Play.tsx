@@ -1,8 +1,11 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useState } from "react";
 import { AgentNotice } from "../components/AgentNotice";
+import { EasterEggs } from "../components/EasterEggs";
 import { DealPopup, playDeal } from "../components/Deal";
-import { FaaahPopup, playFaaah, preloadFaaah, useMute } from "../components/Faaah";
+import { MemePopup, playSound, preloadSound, useMute } from "../components/Faaah";
+import { cueFor, CUE_KEYS } from "../data/sounds";
+import type { CueKey } from "../data/types";
 import { BigTimer, Footer, useEventClock } from "../components/chrome";
 import { SiteHeader } from "../components/SiteHeader";
 import { THEME_INFO, ThemeArt } from "../components/themes";
@@ -38,10 +41,17 @@ function ChallengeModal({ c, onClose }: { c: Challenge | null; onClose: () => vo
   const [busy, setBusy] = useState(false);
   const [confirmHint, setConfirmHint] = useState<number | null>(null);
   const [celebrate, setCelebrate] = useState(0);
-  const [faaah, setFaaah] = useState(0);
+  const [meme, setMeme] = useState<{ n: number; mood: "wrong" | "lastAttempt" | "outOfAttempts"; text: string }>({ n: 0, mood: "wrong", text: "" });
   const [won, setWon] = useState(0);
   const [wonPoints, setWonPoints] = useState(0);
-  useEffect(() => { if (c) preloadFaaah(); }, [c]);
+  const [dealText, setDealText] = useState("");
+  // Load this challenge's meme sounds as soon as it opens, so they play without delay.
+  useEffect(() => { if (c) for (const k of CUE_KEYS) preloadSound(be.soundSrc(cueFor(db.soundboard, c.cues, k).sound)); }, [c?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const fire = (key: CueKey) => {
+    const cue = cueFor(be.db().soundboard, c?.cues, key);
+    playSound(be.soundSrc(cue.sound), cue.seconds, cue.sound === "builtin:deal" ? playDeal : undefined);
+    return cue;
+  };
   const [muted, toggleMute] = useMute();
   const type = db.types.find((t) => t.id === c?.typeId);
   const wave = db.waves.find((w) => w.id === c?.waveId);
@@ -74,8 +84,15 @@ function ChallengeModal({ c, onClose }: { c: Challenge | null; onClose: () => vo
     const r = await be.submitFlag(c.id, flag);
     setBusy(false);
     setMsg({ tone: r.correct ? "ok" : "bad", text: r.message });
-    if (r.correct && !r.alreadySolved) { setCelebrate((x) => x + 1); setFlag(""); setWonPoints(r.points ?? c.points); setWon((x) => x + 1); playDeal(); toast(`${c.title}: +${r.points} points for your team`, "ok"); }
-    if (r.ok && !r.correct) { setFaaah((x) => x + 1); playFaaah(); }
+    if (r.correct && !r.alreadySolved) { setCelebrate((x) => x + 1); setFlag(""); setWonPoints(r.points ?? c.points); setDealText(fire("correct").text); setWon((x) => x + 1); toast(`${c.title}: +${r.points} points for your team`, "ok"); }
+    if (r.ok && !r.correct) {
+      // Which moment is it? Uses the fresh data the server just sent back.
+      const fresh = be.db().challenges.find((x) => x.id === c.id) ?? c;
+      const leftNow = attemptsLeft(be.db(), user.teamId!, fresh);
+      const mood = fresh.maxAttempts > 0 && leftNow <= 0 ? "outOfAttempts" : fresh.maxAttempts > 0 && leftNow === 1 ? "lastAttempt" : "wrong";
+      const cue = fire(mood);
+      setMeme((m) => ({ n: m.n + 1, mood, text: cue.text }));
+    }
   }
 
   return (
@@ -167,8 +184,8 @@ function ChallengeModal({ c, onClose }: { c: Challenge | null; onClose: () => vo
               <button type="button" className="underline-offset-4 hover:underline" onClick={toggleMute} aria-pressed={muted}>{muted ? "Sound off" : "Sound on"}</button>
             </div>
           </div>
-          <FaaahPopup trigger={faaah} />
-          <DealPopup trigger={won} points={wonPoints} title={c.title} />
+          <MemePopup trigger={meme.n} mood={meme.mood} text={meme.text} />
+          <DealPopup trigger={won} points={wonPoints} title={c.title} text={dealText} />
         </div>
       )}
     </Modal>
@@ -248,7 +265,7 @@ export default function Play() {
               <p className="text-[13px] text-aqua/80">Your startup</p>
               <h1 className="mt-1 text-[28px] font-bold leading-tight">{team?.name ?? "No team"}</h1>
               <div className="mt-5 flex flex-wrap gap-x-8 gap-y-3">
-                <div><p className="text-[13px] text-aqua/80">Team valuation</p><CountUp value={row?.score ?? 0} className="font-display text-[30px] font-bold text-brass" /></div>
+                <div data-egg="valuation" className="select-none"><p className="text-[13px] text-aqua/80">Team valuation</p><CountUp value={row?.score ?? 0} className="font-display text-[30px] font-bold text-brass" /></div>
                 <div><p className="text-[13px] text-aqua/80">Rank</p><p className="font-display text-[30px] font-bold">{row ? `${row.rank} of ${board.length}` : "-"}</p></div>
               </div>
               <ul className="mt-5 flex flex-wrap gap-2" aria-label="Team members">
@@ -303,6 +320,7 @@ export default function Play() {
       </main>
       <Footer />
       <ChallengeModal c={current} onClose={() => setOpenId(null)} />
+      <EasterEggs />
     </div>
   );
 }

@@ -9,13 +9,15 @@
 import { hashFlag, hashPassword, randomId, randomSalt, sameHash, tempPassword } from "./crypto";
 import { demoDB, freshDB, makeUser } from "./seed";
 import { attemptsLeft, eventStatus, releaseStatus, solves, unlockedHints, WAVE_SIZE } from "./scoring";
-import type { Challenge, ChallengeType, DB, Hint, NoticeLevel, Settings, SubmitResult, Team, ThemeKey, User } from "./types";
+import { BUILTIN_SOUNDS, CUE_KEYS, defaultSoundboard, MAX_SOUND_BYTES } from "./sounds";
+import type { Challenge, ChallengeType, Cue, CueKey, DB, Hint, NoticeLevel, Settings, SoundMeta, SubmitResult, Team, ThemeKey, User } from "./types";
 import { plainCipher, type Cipher } from "./vault";
 
 export interface Credential { team: string; displayName: string; username: string; password: string }
 export interface ChallengeInput {
   typeId: string; theme: ThemeKey; title: string; description: string; points: number;
   flag?: string; caseSensitive: boolean; files: { name: string; url: string }[]; hints: Hint[]; maxAttempts: number; hidden: boolean;
+  cues?: Partial<Record<CueKey, Cue>>;
 }
 export interface ParsedFile { items: ChallengeInput[]; errors: string[] }
 
@@ -56,6 +58,12 @@ export interface Backend {
   deleteUser(userId: string): Promise<void>;
   // admin: notifications and data
   postNotification(title: string, body: string, level: NoticeLevel): Promise<void>;
+  // admin: soundboard
+  updateCue(key: CueKey, cue: Cue): Promise<void>;
+  uploadSound(name: string, dataUrl: string): Promise<SoundMeta>;
+  deleteSound(id: string): Promise<void>;
+  /** A URL the browser can play for a sound reference ("builtin:…" or "upload:…"), or null. */
+  soundSrc(ref: string): string | null;
   deleteNotification(id: string): Promise<void>;
   exportJSON(): Promise<string>;
   importJSON(text: string): Promise<void>;
@@ -108,7 +116,11 @@ export function migrate(d: any): DB | null {
     d.hintUnlocks = [];
     d.version = 3;
   }
-  return d?.version === 3 ? (d as DB) : null;
+  if (d?.version === 3) {
+    d.soundboard = defaultSoundboard();
+    d.version = 4;
+  }
+  return d?.version === 4 ? (d as DB) : null;
 }
 
 /** Reads challenges from CSV or a JSON array, for review in the form before posting. */
@@ -143,6 +155,33 @@ export function parseChallengeText(text: string, types: ChallengeType[]): Parsed
       hints: Array.isArray(it.hints) ? (it.hints as Hint[]) : String(it.hint ?? "").trim() ? [{ text: String(it.hint).trim(), cost: Math.max(0, Number(it.hint_cost ?? it.hintCost ?? 0) || 0) }] : [] });
   });
   return { items, errors };
+}
+
+const baseUrl = () => { try { return import.meta.env.BASE_URL ?? "/"; } catch { return "/"; } };
+
+/** Validates an uploaded sound and returns its details. Shared by the browser and the server. */
+export function soundMetaFor(name: string, dataUrl: string): SoundMeta {
+  const m = /^data:(audio\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+  if (!m) throw new BackendError("That file isn't an audio file. Use an MP3, WAV, OGG or M4A.");
+  const bytes = Math.floor((m[2].length * 3) / 4) - (m[2].endsWith("==") ? 2 : m[2].endsWith("=") ? 1 : 0);
+  if (bytes > MAX_SOUND_BYTES) throw new BackendError(`That sound is ${Math.round(bytes / 1024)} KB. The limit is ${MAX_SOUND_BYTES / 1024} KB; trim it to a few seconds.`);
+  const clean = name.replace(/\.[a-z0-9]+$/i, "").trim().slice(0, 60) || "Sound";
+  return { id: randomId("snd-"), name: clean, bytes, mime: m[1], addedAt: new Date().toISOString() };
+}
+
+function checkCue(cue: Cue, sounds: SoundMeta[]): Cue {
+  const sound = String(cue?.sound ?? "none");
+  const ok = sound === "none" || BUILTIN_SOUNDS.some((b) => b.ref === sound) || (sound.startsWith("upload:") && sounds.some((s) => `upload:${s.id}` === sound));
+  if (!ok) throw new BackendError("That sound isn't on the soundboard any more.");
+  const seconds = Math.min(30, Math.max(1, Math.round(Number(cue.seconds) || 4)));
+  return { sound, text: String(cue.text ?? "").trim().slice(0, 40), seconds };
+}
+
+function cleanCues(cues: ChallengeInput["cues"]): Challenge["cues"] {
+  if (!cues) return undefined;
+  const out: NonNullable<Challenge["cues"]> = {};
+  for (const k of CUE_KEYS) { const c = cues[k]; if (c) out[k] = { sound: String(c.sound), text: String(c.text ?? "").trim().slice(0, 40), seconds: Math.min(30, Math.max(1, Math.round(Number(c.seconds) || 4))) }; }
+  return Object.keys(out).length ? out : undefined;
 }
 
 export class LocalBackend implements Backend {
@@ -318,7 +357,7 @@ export class LocalBackend implements Backend {
     return { id: existing?.id ?? randomId("c-"), createdAt: existing?.createdAt ?? new Date().toISOString(), ...rest,
       title: rest.title.trim(), files: rest.files.filter((f) => f.name.trim() && f.url.trim()),
       hints: rest.hints.filter((h) => h.text.trim()).map((h) => ({ text: h.text.trim(), cost: Math.round(h.cost) || 0 })),
-      maxAttempts: Math.round(rest.maxAttempts) || 0, waveId, releaseAt, flagSalt, flagHash };
+      maxAttempts: Math.round(rest.maxAttempts) || 0, cues: cleanCues(rest.cues), waveId, releaseAt, flagSalt, flagHash };
   }
 
   /** Posts exactly five challenges together as the next wave. */
@@ -382,6 +421,46 @@ export class LocalBackend implements Backend {
     if (c.maxAttempts === 0) throw new BackendError("This challenge already has unlimited attempts.");
     this.commit((d) => { const x = d.challenges.find((y) => y.id === id)!; x.maxAttempts = Math.max(1, x.maxAttempts + extra); });
   }
+  // ---------------------------------------------------------------- admin: soundboard
+  async updateCue(key: CueKey, cue: Cue) {
+    this.requireAdmin();
+    if (!CUE_KEYS.includes(key)) throw new BackendError("Unknown moment.");
+    const c = checkCue(cue, this.state.soundboard.sounds);
+    this.commit((d) => { d.soundboard.cues[key] = c; });
+  }
+  /** Browser-only version: the audio is kept in this browser's storage. The server stores it in the database instead. */
+  async uploadSound(name: string, dataUrl: string) {
+    this.requireAdmin();
+    const meta = soundMetaFor(name, dataUrl);
+    try { this.storage.setItem(`ecocypher:sound:${meta.id}`, dataUrl); }
+    catch { throw new BackendError("This browser has no room left for that sound. Try a shorter clip."); }
+    await this.registerSound(meta);
+    return meta;
+  }
+  /** Records an uploaded sound's details. Called after the audio itself has been stored. */
+  async registerSound(meta: SoundMeta) {
+    this.requireAdmin();
+    this.commit((d) => { d.soundboard.sounds.push(meta); });
+  }
+  async deleteSound(id: string) {
+    this.requireAdmin();
+    const ref = `upload:${id}`;
+    this.commit((d) => {
+      d.soundboard.sounds = d.soundboard.sounds.filter((s) => s.id !== id);
+      for (const k of CUE_KEYS) if (d.soundboard.cues[k].sound === ref) d.soundboard.cues[k] = defaultSoundboard().cues[k];
+      for (const c of d.challenges) for (const k of CUE_KEYS) if (c.cues?.[k]?.sound === ref) delete c.cues[k];
+    });
+    try { this.storage.removeItem(`ecocypher:sound:${id}`); } catch { /* ignore */ }
+  }
+  soundSrc(ref: string) {
+    if (ref.startsWith("builtin:")) {
+      const b = BUILTIN_SOUNDS.find((x) => x.ref === ref);
+      return b?.file ? `${baseUrl()}${b.file}` : null;
+    }
+    if (ref.startsWith("upload:")) { try { return this.storage.getItem(`ecocypher:sound:${ref.slice(7)}`); } catch { return null; } }
+    return null;
+  }
+
   async deleteChallenge(id: string) {
     this.requireAdmin();
     this.commit((d) => {

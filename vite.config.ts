@@ -10,6 +10,7 @@ const CSP = [
   "font-src 'self' data:",
   "img-src 'self' data: https:",
   "connect-src 'self'",
+  "media-src 'self' data: blob:",
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",

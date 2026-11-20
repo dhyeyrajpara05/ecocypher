@@ -9,6 +9,10 @@ export interface KV {
   meta(): Promise<Meta>;
   /** Saves only if the stored version is still `expectV`. Returns false if someone else wrote first. */
   write(expectV: number, data: string, times: string[]): Promise<boolean>;
+  /** Large values kept apart from the main data (uploaded sounds), so polling stays small. */
+  getBlob(name: string): Promise<string | null>;
+  putBlob(name: string, value: string): Promise<void>;
+  delBlob(name: string): Promise<void>;
 }
 
 const DATA = "ecocypher:data";
@@ -31,6 +35,10 @@ export class MemoryKV implements KV {
     this.m = encodeMeta(expectV + 1, times);
     return true;
   }
+  blobs = new Map<string, string>();
+  async getBlob(name: string) { return this.blobs.get(name) ?? null; }
+  async putBlob(name: string, value: string) { this.blobs.set(name, value); }
+  async delBlob(name: string) { this.blobs.delete(name); }
 }
 
 const CAS = `local m = redis.call('GET', KEYS[2])
@@ -63,6 +71,9 @@ export class UpstashKV implements KV {
     const r = (await this.call("", ["EVAL", CAS, "2", DATA, META, String(expectV), data, encodeMeta(expectV + 1, times)])) as { result: number };
     return r.result === 1;
   }
+  async getBlob(name: string) { return ((await this.call("", ["GET", `ecocypher:blob:${name}`])) as { result: string | null }).result; }
+  async putBlob(name: string, value: string) { await this.call("", ["SET", `ecocypher:blob:${name}`, value]); }
+  async delBlob(name: string) { await this.call("", ["DEL", `ecocypher:blob:${name}`]); }
 }
 
 /**

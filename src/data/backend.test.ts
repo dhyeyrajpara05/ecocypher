@@ -138,7 +138,7 @@ describe("attempts and hints", () => {
   it("upgrades data saved by the previous version", () => {
     const old = { version: 2, challenges: [{ id: "x", hint: "old hint" }, { id: "y", hint: "" }] };
     const m = migrate(old)!;
-    expect(m.version).toBe(3);
+    expect(m.version).toBe(4);
     expect(m.challenges[0].hints).toEqual([{ text: "old hint", cost: 0 }]);
     expect(m.challenges[1].hints).toEqual([]);
     expect(m.hintUnlocks).toEqual([]);
@@ -159,6 +159,38 @@ describe("grouping singles into waves", () => {
     await be.splitWave(w.id);
     expect(be.db().waves.some((x) => x.id === w.id)).toBe(false);
     expect(be.db().challenges.filter((c) => ids.includes(c.id)).every((c) => c.waveId === null)).toBe(true);
+  });
+});
+
+describe("soundboard", () => {
+  const mp3 = "data:audio/mpeg;base64," + btoa("ID3fake-audio-bytes");
+  it("uploads a sound, uses it for a moment, and cleans up on delete", async () => {
+    await asAdmin();
+    const s = await be.uploadSound("bruh.mp3", mp3);
+    expect(s.name).toBe("bruh");
+    expect(be.soundSrc(`upload:${s.id}`)).toBe(mp3);
+    await be.updateCue("lastAttempt", { sound: `upload:${s.id}`, text: "one left!", seconds: 99 });
+    expect(be.db().soundboard.cues.lastAttempt).toEqual({ sound: `upload:${s.id}`, text: "one left!", seconds: 30 });
+    const c = await be.saveChallenge(null, { ...input("Cue test", "ECO{x}"), cues: { wrong: { sound: `upload:${s.id}`, text: "", seconds: 3 } } }, null);
+    expect(c.cues?.wrong?.sound).toBe(`upload:${s.id}`);
+    await be.deleteSound(s.id);
+    expect(be.db().soundboard.sounds).toHaveLength(0);
+    expect(be.db().soundboard.cues.lastAttempt.sound).toBe("builtin:abhi-maza");          // back to the default
+    expect(be.db().challenges.find((x) => x.id === c.id)!.cues?.wrong).toBeUndefined();
+    expect(be.soundSrc(`upload:${s.id}`)).toBeNull();
+  });
+  it("refuses non-audio, oversized and unknown sounds", async () => {
+    await asAdmin();
+    await expect(be.uploadSound("x", "data:text/html;base64,PGgxPg==")).rejects.toThrow(/isn't an audio file/);
+    await expect(be.uploadSound("x", "data:audio/mpeg;base64," + "A".repeat(900_000))).rejects.toThrow(/limit/);
+    await expect(be.updateCue("wrong", { sound: "upload:nope", text: "", seconds: 3 })).rejects.toThrow(/isn't on the soundboard/);
+    be.logout(); await be.loginMember("t1", "t1-u1", DEMO_PLAYER_PASSWORD);
+    await expect(be.uploadSound("x", mp3)).rejects.toThrow(/Only admins/);
+  });
+  it("gives older saved data the default soundboard", () => {
+    const m = migrate({ version: 3, challenges: [], hintUnlocks: [] })!;
+    expect(m.version).toBe(4);
+    expect(m.soundboard.cues.outOfAttempts.sound).toBe("builtin:game-over");
   });
 });
 

@@ -5,7 +5,8 @@
  * the data its user may see.
  */
 import { BackendError, parseChallengeText, type Backend, type ChallengeInput, type Credential, type ParsedFile } from "./backend";
-import type { Challenge, ChallengeType, DB, Hint, NoticeLevel, Settings, SubmitResult, User } from "./types";
+import { BUILTIN_SOUNDS } from "./sounds";
+import type { Challenge, ChallengeType, Cue, CueKey, DB, Hint, NoticeLevel, Settings, SoundMeta, SubmitResult, User } from "./types";
 
 const TOKEN = "ecocypher:token";
 const POLL_MS = 3000;
@@ -116,6 +117,14 @@ export class RemoteBackend implements Backend {
   resetPassword(userId: string) { return this.call<Credential>("resetPassword", userId); }
   deleteUser(userId: string) { return this.call<void>("deleteUser", userId); }
 
+  updateCue(key: CueKey, cue: Cue) { return this.call<void>("updateCue", key, cue); }
+  uploadSound(name: string, dataUrl: string) { return this.call<SoundMeta>("uploadSound", name, dataUrl); }
+  deleteSound(id: string) { return this.call<void>("deleteSound", id); }
+  soundSrc(ref: string) {
+    if (ref.startsWith("builtin:")) { const b = BUILTIN_SOUNDS.find((x) => x.ref === ref); return b?.file ? import.meta.env.BASE_URL + b.file : null; }
+    if (ref.startsWith("upload:")) return this.api(`sound?id=${encodeURIComponent(ref.slice(7))}`);
+    return null;
+  }
   postNotification(title: string, body: string, level: NoticeLevel) { return this.call<void>("postNotification", title, body, level); }
   deleteNotification(id: string) { return this.call<void>("deleteNotification", id); }
   exportJSON() { return this.call<string>("exportJSON"); }

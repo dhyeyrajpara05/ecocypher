@@ -3,14 +3,14 @@
  * server, against one shared database, so every player and the admin see the same event.
  * Flags are checked here; players only ever receive a filtered view (see data/view.ts).
  */
-import { BackendError, KEY, LocalBackend, SESSION } from "../data/backend";
+import { BackendError, KEY, LocalBackend, migrate, SESSION, soundMetaFor } from "../data/backend";
 import { demoDB, freshDB } from "../data/seed";
 import type { DB, User } from "../data/types";
 import { publicView, viewChangeTimes } from "../data/view";
 import type { KV } from "./kv";
 
 export interface Env { SESSION_SECRET?: string; ADMIN_PASSWORD?: string; SEED?: string }
-export interface Reply { status: number; body?: unknown }
+export interface Reply { status: number; body?: unknown; raw?: { mime: string; bytes: Uint8Array } }
 
 /** Everything the browser may call. Anything else is refused. */
 const METHODS = new Set([
@@ -19,6 +19,7 @@ const METHODS = new Set([
   "postWave", "saveChallenge", "setRelease", "groupIntoWave", "splitWave", "addAttempts", "deleteChallenge",
   "createTeam", "importTeams", "renameTeam", "deleteTeam", "addMember", "resetPassword", "deleteUser",
   "postNotification", "deleteNotification", "exportJSON", "importJSON", "startFresh", "loadDemo",
+  "updateCue", "uploadSound", "deleteSound",
 ]);
 const ADMIN_ONLY = new Set(["loadDemo"]);
 const TOKEN_HOURS = 14;
@@ -67,7 +68,12 @@ async function verify(env: Env, db: DB, token: string | null): Promise<User | nu
 // ------------------------------------------------------------------ data
 async function load(kv: KV, env: Env): Promise<{ db: DB; raw: string; v: number }> {
   const got = await kv.read();
-  if (got.data) return { db: JSON.parse(got.data), raw: got.data, v: got.v };
+  if (got.data) {
+    // Data saved by an older version is upgraded on read; it is written back on the next change.
+    const db = migrate(JSON.parse(got.data));
+    if (!db) throw new Error("The saved event data couldn't be read.");
+    return { db, raw: got.data, v: got.v };
+  }
   let db: DB;
   if (env.SEED === "demo") db = await demoDB();
   else {
@@ -103,9 +109,43 @@ export async function getState(kv: KV, env: Env, token: string | null, clientV: 
   return { status: 200, body: { v, now: Date.now(), me: me?.id ?? null, view: publicView(db, me), tokenValid: !token || !!me } };
 }
 
+/** GET /api/sound?id=… — an uploaded sound's audio. Sounds aren't secret; they're cached for a year. */
+export async function getSound(kv: KV, id: string): Promise<{ status: number; mime?: string; bytes?: Uint8Array }> {
+  if (!/^snd-[a-z0-9]+$/i.test(id)) return { status: 404 };
+  const dataUrl = await kv.getBlob(`sound:${id}`);
+  const m = dataUrl && /^data:([^;]+);base64,(.*)$/.exec(dataUrl);
+  if (!m) return { status: 404 };
+  const bin = atob(m[2]);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return { status: 200, mime: m[1], bytes };
+}
+
 /** POST /api/rpc { method, args }. Runs one action as the logged-in person. */
 export async function rpc(kv: KV, env: Env, token: string | null, method: string, args: unknown[]): Promise<Reply> {
   if (!METHODS.has(method) || !Array.isArray(args)) return { status: 400, body: { error: "Unknown action." } };
+  // Sounds: the audio goes into its own database entry; only its details go into the main data.
+  if (method === "uploadSound" || method === "deleteSound") {
+    const { db } = await load(kv, env);
+    const me = await verify(env, db, token);
+    if (me?.role !== "admin") return { status: 403, body: { error: "Only admins can do that." } };
+    if (method === "uploadSound") {
+      let meta;
+      try { meta = soundMetaFor(String(args[0] ?? ""), String(args[1] ?? "")); }
+      catch (e) { if (e instanceof BackendError) return { status: 400, body: { error: e.message } }; throw e; }
+      await kv.putBlob(`sound:${meta.id}`, String(args[1]));
+      const r = await rpcCore(kv, env, token, "registerSound", [meta]);
+      if (r.status === 200) (r.body as { result: unknown }).result = meta;
+      return r;
+    }
+    const r = await rpcCore(kv, env, token, "deleteSound", args);
+    if (r.status === 200) await kv.delBlob(`sound:${String(args[0])}`);
+    return r;
+  }
+  return rpcCore(kv, env, token, method, args);
+}
+
+async function rpcCore(kv: KV, env: Env, token: string | null, method: string, args: unknown[]): Promise<Reply> {
   for (let attempt = 0; attempt < 6; attempt++) {
     const { db, raw, v } = await load(kv, env);
     const me = await verify(env, db, token);

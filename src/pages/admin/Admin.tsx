@@ -6,6 +6,7 @@ import Dashboard from "./Dashboard";
 import Post from "./Post";
 import Library from "./Library";
 import Teams from "./Teams";
+import Soundboard from "./Soundboard";
 import { NotificationsAdmin, Settings, Submissions } from "./Misc";
 
 const ICONS: Record<string, JSX.Element> = {
@@ -15,6 +16,7 @@ const ICONS: Record<string, JSX.Element> = {
   teams: <><circle cx="9" cy="8" r="3" /><path d="M3 20c0-3 3-5 6-5s6 2 6 5M16 11a3 3 0 1 0 0-6M21 20c0-2-1.5-4-4-4.6" /></>,
   bell: <path d="M6 16V11a6 6 0 1 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0" />,
   subs: <path d="M5 4h14v16H5zM9 9h6M9 13h6M9 17h3" />,
+  sound: <path d="M4 9v6h4l5 4V5L8 9zM16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11" />,
   gear: <><circle cx="12" cy="12" r="3" /><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6a7 7 0 0 0 0 2.4l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z" /></>,
 };
 
@@ -24,6 +26,7 @@ const NAV: [string, string, string][] = [
   ["library", "Challenge library", "lib"],
   ["teams", "Teams & members", "teams"],
   ["notifications", "Notifications", "bell"],
+  ["soundboard", "Soundboard", "sound"],
   ["submissions", "Submissions", "subs"],
   ["settings", "Settings", "gear"],
 ];
@@ -74,6 +77,7 @@ export default function Admin() {
             <Route path="library" element={<Library />} />
             <Route path="teams" element={<Teams />} />
             <Route path="notifications" element={<NotificationsAdmin />} />
+            <Route path="soundboard" element={<Soundboard />} />
             <Route path="submissions" element={<Submissions />} />
             <Route path="settings" element={<Settings />} />
             <Route path="*" element={<Navigate to="" replace />} />

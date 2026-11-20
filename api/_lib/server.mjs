@@ -43,6 +43,33 @@ function sameHash(a, b) {
   return d === 0;
 }
 
+// src/data/sounds.ts
+var BUILTIN_SOUNDS = [
+  { ref: "builtin:faaah", name: "FAAAAH", file: "sounds/faaah.mp3" },
+  { ref: "builtin:abhi-maza", name: "Abhi maza aayega", file: "sounds/abhi-maza.mp3" },
+  { ref: "builtin:game-over", name: "Game over", file: "sounds/game-over.mp3" },
+  { ref: "builtin:deal", name: "Deal cha-ching (generated)" }
+];
+var CUE_LABELS = {
+  wrong: { title: "Wrong flag", when: "Any wrong guess (when more than one attempt is left, or attempts are unlimited)", defaultText: "FAAAAAA!!!!!!!!" },
+  lastAttempt: { title: "Last attempt left", when: "A wrong guess that leaves the team exactly one attempt", defaultText: "ABHI MAZA AAYEGA!" },
+  outOfAttempts: { title: "Out of attempts", when: "The wrong guess that uses the team's final attempt", defaultText: "GAME OVER" },
+  correct: { title: "Correct flag", when: "The team captures the flag", defaultText: "DEAL!" }
+};
+var CUE_KEYS = Object.keys(CUE_LABELS);
+function defaultSoundboard() {
+  return {
+    cues: {
+      wrong: { sound: "builtin:faaah", text: "", seconds: 4 },
+      lastAttempt: { sound: "builtin:abhi-maza", text: "", seconds: 6 },
+      outOfAttempts: { sound: "builtin:game-over", text: "", seconds: 8 },
+      correct: { sound: "builtin:deal", text: "", seconds: 3 }
+    },
+    sounds: []
+  };
+}
+var MAX_SOUND_BYTES = 600 * 1024;
+
 // src/data/seed.ts
 var DEMO_ADMIN = { username: "admin", password: "EcoCypher@2026" };
 var DEMO_PLAYER_PASSWORD = "dive-in-2026";
@@ -64,7 +91,8 @@ async function makeUser(p) {
 }
 function emptyDB() {
   return {
-    version: 3,
+    version: 4,
+    soundboard: defaultSoundboard(),
     demo: false,
     settings: {
       eventName: "EcoCypher",
@@ -335,7 +363,11 @@ function migrate(d) {
     d.hintUnlocks = [];
     d.version = 3;
   }
-  return d?.version === 3 ? d : null;
+  if (d?.version === 3) {
+    d.soundboard = defaultSoundboard();
+    d.version = 4;
+  }
+  return d?.version === 4 ? d : null;
 }
 function parseChallengeText(text, types) {
   let rows = [];
@@ -380,6 +412,37 @@ function parseChallengeText(text, types) {
     });
   });
   return { items, errors };
+}
+var baseUrl = () => {
+  try {
+    return import.meta.env.BASE_URL ?? "/";
+  } catch {
+    return "/";
+  }
+};
+function soundMetaFor(name, dataUrl) {
+  const m = /^data:(audio\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+  if (!m) throw new BackendError("That file isn't an audio file. Use an MP3, WAV, OGG or M4A.");
+  const bytes = Math.floor(m[2].length * 3 / 4) - (m[2].endsWith("==") ? 2 : m[2].endsWith("=") ? 1 : 0);
+  if (bytes > MAX_SOUND_BYTES) throw new BackendError(`That sound is ${Math.round(bytes / 1024)} KB. The limit is ${MAX_SOUND_BYTES / 1024} KB; trim it to a few seconds.`);
+  const clean = name.replace(/\.[a-z0-9]+$/i, "").trim().slice(0, 60) || "Sound";
+  return { id: randomId("snd-"), name: clean, bytes, mime: m[1], addedAt: (/* @__PURE__ */ new Date()).toISOString() };
+}
+function checkCue(cue, sounds) {
+  const sound = String(cue?.sound ?? "none");
+  const ok = sound === "none" || BUILTIN_SOUNDS.some((b) => b.ref === sound) || sound.startsWith("upload:") && sounds.some((s) => `upload:${s.id}` === sound);
+  if (!ok) throw new BackendError("That sound isn't on the soundboard any more.");
+  const seconds = Math.min(30, Math.max(1, Math.round(Number(cue.seconds) || 4)));
+  return { sound, text: String(cue.text ?? "").trim().slice(0, 40), seconds };
+}
+function cleanCues(cues) {
+  if (!cues) return void 0;
+  const out = {};
+  for (const k of CUE_KEYS) {
+    const c = cues[k];
+    if (c) out[k] = { sound: String(c.sound), text: String(c.text ?? "").trim().slice(0, 40), seconds: Math.min(30, Math.max(1, Math.round(Number(c.seconds) || 4))) };
+  }
+  return Object.keys(out).length ? out : void 0;
 }
 var LocalBackend = class {
   constructor(storage = window.localStorage, cipher = plainCipher) {
@@ -602,6 +665,7 @@ var LocalBackend = class {
       files: rest.files.filter((f) => f.name.trim() && f.url.trim()),
       hints: rest.hints.filter((h) => h.text.trim()).map((h) => ({ text: h.text.trim(), cost: Math.round(h.cost) || 0 })),
       maxAttempts: Math.round(rest.maxAttempts) || 0,
+      cues: cleanCues(rest.cues),
       waveId,
       releaseAt,
       flagSalt,
@@ -676,6 +740,61 @@ var LocalBackend = class {
       const x = d.challenges.find((y) => y.id === id);
       x.maxAttempts = Math.max(1, x.maxAttempts + extra);
     });
+  }
+  // ---------------------------------------------------------------- admin: soundboard
+  async updateCue(key, cue) {
+    this.requireAdmin();
+    if (!CUE_KEYS.includes(key)) throw new BackendError("Unknown moment.");
+    const c = checkCue(cue, this.state.soundboard.sounds);
+    this.commit((d) => {
+      d.soundboard.cues[key] = c;
+    });
+  }
+  /** Browser-only version: the audio is kept in this browser's storage. The server stores it in the database instead. */
+  async uploadSound(name, dataUrl) {
+    this.requireAdmin();
+    const meta = soundMetaFor(name, dataUrl);
+    try {
+      this.storage.setItem(`ecocypher:sound:${meta.id}`, dataUrl);
+    } catch {
+      throw new BackendError("This browser has no room left for that sound. Try a shorter clip.");
+    }
+    await this.registerSound(meta);
+    return meta;
+  }
+  /** Records an uploaded sound's details. Called after the audio itself has been stored. */
+  async registerSound(meta) {
+    this.requireAdmin();
+    this.commit((d) => {
+      d.soundboard.sounds.push(meta);
+    });
+  }
+  async deleteSound(id) {
+    this.requireAdmin();
+    const ref = `upload:${id}`;
+    this.commit((d) => {
+      d.soundboard.sounds = d.soundboard.sounds.filter((s) => s.id !== id);
+      for (const k of CUE_KEYS) if (d.soundboard.cues[k].sound === ref) d.soundboard.cues[k] = defaultSoundboard().cues[k];
+      for (const c of d.challenges) for (const k of CUE_KEYS) if (c.cues?.[k]?.sound === ref) delete c.cues[k];
+    });
+    try {
+      this.storage.removeItem(`ecocypher:sound:${id}`);
+    } catch {
+    }
+  }
+  soundSrc(ref) {
+    if (ref.startsWith("builtin:")) {
+      const b = BUILTIN_SOUNDS.find((x) => x.ref === ref);
+      return b?.file ? `${baseUrl()}${b.file}` : null;
+    }
+    if (ref.startsWith("upload:")) {
+      try {
+        return this.storage.getItem(`ecocypher:sound:${ref.slice(7)}`);
+      } catch {
+        return null;
+      }
+    }
+    return null;
   }
   async deleteChallenge(id) {
     this.requireAdmin();
@@ -926,7 +1045,10 @@ var METHODS = /* @__PURE__ */ new Set([
   "exportJSON",
   "importJSON",
   "startFresh",
-  "loadDemo"
+  "loadDemo",
+  "updateCue",
+  "uploadSound",
+  "deleteSound"
 ]);
 var ADMIN_ONLY = /* @__PURE__ */ new Set(["loadDemo"]);
 var TOKEN_HOURS = 14;
@@ -981,7 +1103,11 @@ async function verify(env, db, token) {
 }
 async function load(kv2, env) {
   const got = await kv2.read();
-  if (got.data) return { db: JSON.parse(got.data), raw: got.data, v: got.v };
+  if (got.data) {
+    const db2 = migrate(JSON.parse(got.data));
+    if (!db2) throw new Error("The saved event data couldn't be read.");
+    return { db: db2, raw: got.data, v: got.v };
+  }
   let db;
   if (env.SEED === "demo") db = await demoDB();
   else {
@@ -1015,8 +1141,42 @@ async function getState(kv2, env, token, clientV, since) {
   const me = await verify(env, db, token);
   return { status: 200, body: { v, now: Date.now(), me: me?.id ?? null, view: publicView(db, me), tokenValid: !token || !!me } };
 }
+async function getSound(kv2, id) {
+  if (!/^snd-[a-z0-9]+$/i.test(id)) return { status: 404 };
+  const dataUrl = await kv2.getBlob(`sound:${id}`);
+  const m = dataUrl && /^data:([^;]+);base64,(.*)$/.exec(dataUrl);
+  if (!m) return { status: 404 };
+  const bin = atob(m[2]);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return { status: 200, mime: m[1], bytes };
+}
 async function rpc(kv2, env, token, method, args) {
   if (!METHODS.has(method) || !Array.isArray(args)) return { status: 400, body: { error: "Unknown action." } };
+  if (method === "uploadSound" || method === "deleteSound") {
+    const { db } = await load(kv2, env);
+    const me = await verify(env, db, token);
+    if (me?.role !== "admin") return { status: 403, body: { error: "Only admins can do that." } };
+    if (method === "uploadSound") {
+      let meta;
+      try {
+        meta = soundMetaFor(String(args[0] ?? ""), String(args[1] ?? ""));
+      } catch (e) {
+        if (e instanceof BackendError) return { status: 400, body: { error: e.message } };
+        throw e;
+      }
+      await kv2.putBlob(`sound:${meta.id}`, String(args[1]));
+      const r2 = await rpcCore(kv2, env, token, "registerSound", [meta]);
+      if (r2.status === 200) r2.body.result = meta;
+      return r2;
+    }
+    const r = await rpcCore(kv2, env, token, "deleteSound", args);
+    if (r.status === 200) await kv2.delBlob(`sound:${String(args[0])}`);
+    return r;
+  }
+  return rpcCore(kv2, env, token, method, args);
+}
+async function rpcCore(kv2, env, token, method, args) {
   for (let attempt = 0; attempt < 6; attempt++) {
     const { db, raw, v } = await load(kv2, env);
     const me = await verify(env, db, token);
@@ -1063,6 +1223,10 @@ async function handle(kv2, env, req) {
     if (req.path.endsWith("/api/state") && req.method === "GET") {
       return await getState(kv2, env, token, Number(req.query.get("v")) || 0, Number(req.query.get("t")) || 0);
     }
+    if (req.path.endsWith("/api/sound") && req.method === "GET") {
+      const s = await getSound(kv2, req.query.get("id") ?? "");
+      return s.status === 200 ? { status: 200, raw: { mime: s.mime, bytes: s.bytes } } : { status: 404, body: { error: "Sound not found." } };
+    }
     if (req.path.endsWith("/api/rpc") && req.method === "POST") {
       const b = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body ?? {};
       return await rpc(kv2, env, token, String(b.method), b.args ?? []);
@@ -1089,8 +1253,14 @@ function nodeHandler(getKV) {
     } catch (e) {
       out = { status: 500, body: { error: e.message } };
     }
-    res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
+    if (out.raw) {
+      res.setHeader("Content-Type", out.raw.mime);
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      res.status(200).end(Buffer.from(out.raw.bytes));
+      return;
+    }
+    res.setHeader("Cache-Control", "no-store");
     if (out.body === void 0) res.status(out.status).end();
     else res.status(out.status).json(out.body);
   };
@@ -1137,6 +1307,15 @@ var UpstashKV = class {
   async write(expectV, data, times) {
     const r = await this.call("", ["EVAL", CAS, "2", DATA, META, String(expectV), data, encodeMeta(expectV + 1, times)]);
     return r.result === 1;
+  }
+  async getBlob(name) {
+    return (await this.call("", ["GET", `ecocypher:blob:${name}`])).result;
+  }
+  async putBlob(name, value) {
+    await this.call("", ["SET", `ecocypher:blob:${name}`, value]);
+  }
+  async delBlob(name) {
+    await this.call("", ["DEL", `ecocypher:blob:${name}`]);
   }
 };
 function kvFromEnv(env) {
