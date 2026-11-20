@@ -102,6 +102,8 @@ export class RemoteBackend implements Backend {
   postWave(items: ChallengeInput[], releaseAt: string | null) { return this.call<Challenge[]>("postWave", items, releaseAt); }
   saveChallenge(id: string | null, input: ChallengeInput, releaseAt?: string | null) { return this.call<Challenge>("saveChallenge", id, input, releaseAt); }
   setRelease(id: string, releaseAt: string | null) { return this.call<void>("setRelease", id, releaseAt); }
+  groupIntoWave(ids: string[]) { return this.call<void>("groupIntoWave", ids); }
+  splitWave(waveId: string) { return this.call<void>("splitWave", waveId); }
   addAttempts(id: string, extra: number) { return this.call<void>("addAttempts", id, extra); }
   deleteChallenge(id: string) { return this.call<void>("deleteChallenge", id); }
   parseChallengeFile(text: string): ParsedFile { return parseChallengeText(text, this.state.types); }

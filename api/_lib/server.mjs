@@ -621,6 +621,30 @@ var LocalBackend = class {
     });
     return built;
   }
+  /** Puts exactly five single challenges into a new wave. Each keeps its own release status. */
+  async groupIntoWave(ids) {
+    this.requireAdmin();
+    const unique = [...new Set(ids)];
+    if (unique.length !== WAVE_SIZE) throw new BackendError(`Pick exactly ${WAVE_SIZE} challenges for a wave. You picked ${unique.length}.`);
+    const picked = unique.map((id) => this.state.challenges.find((c) => c.id === id));
+    if (picked.some((c) => !c)) throw new BackendError("One of those challenges no longer exists.");
+    const inWave = picked.find((c) => c.waveId);
+    if (inWave) throw new BackendError(`"${inWave.title}" is already in a wave. Split that wave first.`);
+    const wave = { id: randomId("w-"), number: Math.max(0, ...this.state.waves.map((w) => w.number)) + 1, createdAt: (/* @__PURE__ */ new Date()).toISOString() };
+    this.commit((d) => {
+      d.waves.push(wave);
+      for (const c of d.challenges) if (unique.includes(c.id)) c.waveId = wave.id;
+    });
+  }
+  /** Turns a wave's challenges back into single challenges and removes the wave. */
+  async splitWave(waveId) {
+    this.requireAdmin();
+    if (!this.state.waves.some((w) => w.id === waveId)) throw new BackendError("That wave no longer exists.");
+    this.commit((d) => {
+      for (const c of d.challenges) if (c.waveId === waveId) c.waveId = null;
+      d.waves = d.waves.filter((w) => w.id !== waveId);
+    });
+  }
   /** Creates a single challenge (id = null) or edits any challenge, keeping its wave. */
   async saveChallenge(id, input, releaseAt) {
     this.requireAdmin();
@@ -864,6 +888,8 @@ var METHODS = /* @__PURE__ */ new Set([
   "postWave",
   "saveChallenge",
   "setRelease",
+  "groupIntoWave",
+  "splitWave",
   "addAttempts",
   "deleteChallenge",
   "createTeam",

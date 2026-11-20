@@ -41,6 +41,8 @@ export interface Backend {
   postWave(items: ChallengeInput[], releaseAt: string | null): Promise<Challenge[]>;
   saveChallenge(id: string | null, input: ChallengeInput, releaseAt?: string | null): Promise<Challenge>;
   setRelease(id: string, releaseAt: string | null): Promise<void>;
+  groupIntoWave(ids: string[]): Promise<void>;
+  splitWave(waveId: string): Promise<void>;
   addAttempts(id: string, extra: number): Promise<void>;
   deleteChallenge(id: string): Promise<void>;
   parseChallengeFile(text: string): ParsedFile;
@@ -328,6 +330,31 @@ export class LocalBackend implements Backend {
     const built = await Promise.all(items.map((it) => this.build(it, undefined, wave.id, releaseAt)));
     this.commit((d) => { d.waves.push(wave); d.challenges.push(...built); });
     return built;
+  }
+
+  /** Puts exactly five single challenges into a new wave. Each keeps its own release status. */
+  async groupIntoWave(ids: string[]) {
+    this.requireAdmin();
+    const unique = [...new Set(ids)];
+    if (unique.length !== WAVE_SIZE) throw new BackendError(`Pick exactly ${WAVE_SIZE} challenges for a wave. You picked ${unique.length}.`);
+    const picked = unique.map((id) => this.state.challenges.find((c) => c.id === id));
+    if (picked.some((c) => !c)) throw new BackendError("One of those challenges no longer exists.");
+    const inWave = picked.find((c) => c!.waveId);
+    if (inWave) throw new BackendError(`"${inWave!.title}" is already in a wave. Split that wave first.`);
+    const wave = { id: randomId("w-"), number: Math.max(0, ...this.state.waves.map((w) => w.number)) + 1, createdAt: new Date().toISOString() };
+    this.commit((d) => {
+      d.waves.push(wave);
+      for (const c of d.challenges) if (unique.includes(c.id)) c.waveId = wave.id;
+    });
+  }
+  /** Turns a wave's challenges back into single challenges and removes the wave. */
+  async splitWave(waveId: string) {
+    this.requireAdmin();
+    if (!this.state.waves.some((w) => w.id === waveId)) throw new BackendError("That wave no longer exists.");
+    this.commit((d) => {
+      for (const c of d.challenges) if (c.waveId === waveId) c.waveId = null;
+      d.waves = d.waves.filter((w) => w.id !== waveId);
+    });
   }
 
   /** Creates a single challenge (id = null) or edits any challenge, keeping its wave. */

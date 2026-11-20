@@ -145,6 +145,23 @@ describe("attempts and hints", () => {
   });
 });
 
+describe("grouping singles into waves", () => {
+  it("groups five singles into the next wave and splits it back", async () => {
+    await asAdmin();
+    const ids: string[] = [];
+    for (let i = 0; i < 6; i++) ids.push((await be.saveChallenge(null, input(`S${i}`, `ECO{s${i}}`), null)).id);
+    await expect(be.groupIntoWave(ids.slice(0, 4))).rejects.toThrow(/exactly 5/);
+    await expect(be.groupIntoWave([...ids.slice(0, 4), "c1"])).rejects.toThrow(/already in a wave/);
+    await be.groupIntoWave(ids.slice(0, 5));
+    const w = be.db().waves.find((x) => x.number === 2)!;
+    expect(be.db().challenges.filter((c) => c.waveId === w.id).map((c) => c.title).sort()).toEqual(["S0", "S1", "S2", "S3", "S4"]);
+    expect(be.db().challenges.find((c) => c.title === "S0")!.releaseAt).toBeNull();      // still a draft
+    await be.splitWave(w.id);
+    expect(be.db().waves.some((x) => x.id === w.id)).toBe(false);
+    expect(be.db().challenges.filter((c) => ids.includes(c.id)).every((c) => c.waveId === null)).toBe(true);
+  });
+});
+
 describe("admin", () => {
   beforeEach(asAdmin);
   it("posts a wave of exactly five challenges with the next wave number", async () => {

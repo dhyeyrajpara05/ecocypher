@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { THEME_INFO, ThemeArt } from "../../components/themes";
 import { Empty, Modal, TypeChip, useToast, useRun } from "../../components/ui";
 import type { ChallengeInput } from "../../data/backend";
-import { releaseStatus, solveCounts } from "../../data/scoring";
+import { releaseStatus, solveCounts, WAVE_SIZE } from "../../data/scoring";
 import { useBackend, useDB, useNow } from "../../data/store";
 import type { Challenge, ReleaseStatus } from "../../data/types";
 import { dateTime, fromLocalInput, toLocalInput } from "../../lib/format";
@@ -68,6 +68,9 @@ export default function Library() {
   const [editing, setEditing] = useState<Challenge | null>(null);
   const [scheduling, setScheduling] = useState<Challenge | null>(null);
   const [filter, setFilter] = useState<"all" | ReleaseStatus>("all");
+  const [picked, setPicked] = useState<string[]>([]);
+  const nextWave = Math.max(0, ...db.waves.map((w) => w.number)) + 1;
+  const togglePick = (id: string) => setPicked((p) => p.includes(id) ? p.filter((x) => x !== id) : p.length >= WAVE_SIZE ? p : [...p, id]);
   const groups = [
     ...[...db.waves].sort((a, b) => b.number - a.number).map((w) => ({ key: w.id, title: `Wave ${w.number}`, list: db.challenges.filter((c) => c.waveId === w.id) })),
     { key: "single", title: "Single challenges", list: db.challenges.filter((c) => !c.waveId) },
@@ -93,13 +96,30 @@ export default function Library() {
           <section key={g.key} className="mb-8">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-[18px] font-bold">{g.title}</h2>
-              {g.key !== "single" && unreleased.length > 0 && <button className="btn btn-kelp btn-sm" onClick={() => releaseGroup(unreleased)}>Release this wave now</button>}
+              <span className="flex flex-wrap gap-2">
+                {g.key !== "single" && unreleased.length > 0 && <button className="btn btn-kelp btn-sm" onClick={() => releaseGroup(unreleased)}>Release this wave now</button>}
+                {g.key !== "single" && <button className="btn btn-line btn-sm" onClick={() => { if (confirm(`Split ${g.title}? Its challenges go back to single challenges and keep their release status.`)) void run(be.splitWave(g.key), `${g.title} split into single challenges`); }}>Split wave</button>}
+              </span>
             </div>
+            {g.key === "single" && (
+              <div className="sticky top-2 z-10 mb-3 flex flex-wrap items-center gap-3 rounded-2xl border border-fin-200 bg-white/95 px-4 py-3 text-[14px] shadow-sm backdrop-blur">
+                <span className="flex-1">Tick {WAVE_SIZE} single challenges to group them into <b>Wave {nextWave}</b>. <b className="tabular">{picked.length} of {WAVE_SIZE}</b> picked.</span>
+                {picked.length > 0 && <button className="btn btn-line btn-sm" onClick={() => setPicked([])}>Clear</button>}
+                <button className="btn btn-kelp btn-sm" disabled={picked.length !== WAVE_SIZE}
+                  onClick={() => run(be.groupIntoWave(picked), `Wave ${nextWave} created. Its challenges keep their own release status.`).then((ok) => { if (ok) setPicked([]); })}>
+                  Make Wave {nextWave}
+                </button>
+              </div>
+            )}
             <ul className="space-y-2">
-              {g.list.sort((a, b) => a.points - b.points).map((c) => {
+              {g.list.sort((a, b) => g.key === "single" ? Date.parse(a.createdAt) - Date.parse(b.createdAt) : a.points - b.points).map((c) => {
                 const st = releaseStatus(c, now);
                 return (
-                  <li key={c.id} className="panel flex flex-wrap items-center gap-4 px-4 py-3">
+                  <li key={c.id} className={`panel flex flex-wrap items-center gap-4 px-4 py-3 ${picked.includes(c.id) ? "ring-2 ring-kelp" : ""}`}>
+                    {!c.waveId && (
+                      <input type="checkbox" className="h-5 w-5 shrink-0 cursor-pointer accent-[#1F7A5C]" aria-label={`Pick ${c.title} for Wave ${nextWave}`}
+                        checked={picked.includes(c.id)} disabled={!picked.includes(c.id) && picked.length >= WAVE_SIZE} onChange={() => togglePick(c.id)} />
+                    )}
                     <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl" style={{ background: THEME_INFO[c.theme].tint }}><ThemeArt theme={c.theme} size={30} /></span>
                     <span className="min-w-[12rem] flex-1">
                       <span className="block font-semibold">{c.title}{c.hidden && <span className="ml-2 text-[12px] font-normal text-fin">hidden</span>}</span>

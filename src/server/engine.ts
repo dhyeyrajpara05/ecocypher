@@ -16,7 +16,7 @@ export interface Reply { status: number; body?: unknown }
 const METHODS = new Set([
   "login", "loginMember", "changePassword", "submitFlag", "unlockHint",
   "updateSettings", "startTimer", "extendTimer", "endEventNow", "resetTimer", "updateType",
-  "postWave", "saveChallenge", "setRelease", "addAttempts", "deleteChallenge",
+  "postWave", "saveChallenge", "setRelease", "groupIntoWave", "splitWave", "addAttempts", "deleteChallenge",
   "createTeam", "importTeams", "renameTeam", "deleteTeam", "addMember", "resetPassword", "deleteUser",
   "postNotification", "deleteNotification", "exportJSON", "importJSON", "startFresh", "loadDemo",
 ]);
