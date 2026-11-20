@@ -7,7 +7,8 @@ import { isMuted } from "./Faaah";
  * Two secrets on the challenges page. Neither gives points or touches flags.
  *  1. Konami code (↑ ↑ ↓ ↓ ← → ← → B A): a feeding frenzy of sharks swims across the screen.
  *     A hint is printed in the browser console, where CTF players love to look.
- *  2. Click your team's valuation 7 times: "Australia mode" turns the page upside down for a moment,
+ *  1b. Or just click the little fin peeking up from the bottom of the page.
+ *  2. Click your team's valuation 3 times: "Australia mode" turns the page upside down for a moment,
  *     a nod to Deakin's home.
  */
 const KONAMI = ["ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "b", "a"];
@@ -69,7 +70,7 @@ export function EasterEggs() {
       clicks++;
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => { clicks = 0; }, 1500);
-      if (clicks >= 7) { clicks = 0; setAussie(true); setTimeout(() => setAussie(false), 3200); }
+      if (clicks >= 3) { clicks = 0; setAussie(true); setTimeout(() => setAussie(false), 3200); }
     };
     window.addEventListener("keydown", onKey);
     window.addEventListener("click", onClick);
@@ -97,6 +98,19 @@ export function EasterEggs() {
   // Rendered outside the page root, so the messages stay the right way up in Australia mode.
   return createPortal(
     <>
+      {/* The peeking fin: one click starts the frenzy. */}
+      <motion.button type="button" aria-label="A shark fin is peeking out. Click it." title="Psst…"
+        className="fixed bottom-0 right-[12%] z-[60] cursor-pointer"
+        initial={{ y: 30 }} animate={reduce ? { y: 6 } : { y: [10, 2, 10], x: [0, -18, 0] }}
+        transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+        whileHover={{ y: -6, scale: 1.1 }} whileTap={{ scale: 0.9 }}
+        onClick={() => { setFrenzy((n) => n + 1); chomp(); }}>
+        <svg width="46" height="40" viewBox="0 0 74 58" aria-hidden="true">
+          <path d="M6 54 C 22 46 36 30 44 2 C 52 22 60 40 72 54 Z" fill="#5C7A86" />
+          <path d="M44 2 C 52 22 60 40 72 54 L 58 54 C 52 40 47 24 44 2Z" fill="#A7BCC4" opacity=".4" />
+          <path d="M0 55 Q 37 46 74 55" stroke="#1E5B7A" strokeWidth="3" fill="none" opacity=".6" />
+        </svg>
+      </motion.button>
       <AnimatePresence>
         {frenzy > 0 && (
           <motion.div key={frenzy} className="pointer-events-none fixed inset-0 z-[90] overflow-hidden bg-deep/25"
