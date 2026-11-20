@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Modal, useToast } from "../../components/ui";
+import { Modal, useToast, useRun } from "../../components/ui";
 import type { Credential } from "../../data/backend";
 import { useBackend, useDB, useNow } from "../../data/store";
 import type { NoticeLevel } from "../../data/types";
@@ -11,6 +11,7 @@ export function NotificationsAdmin() {
   const db = useDB();
   const now = useNow(10000);
   const toast = useToast();
+  const run = useRun();
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [level, setLevel] = useState<NoticeLevel>("info");
@@ -19,8 +20,7 @@ export function NotificationsAdmin() {
       <PageHead title="Notifications">Messages appear on every player's Notifications page, pop up while they play, and show as an unread badge.</PageHead>
       <form className="panel space-y-4 p-5" onSubmit={(e) => {
         e.preventDefault();
-        try { be.postNotification(title, body, level); setTitle(""); setBody(""); setLevel("info"); toast("Notification sent", "ok"); }
-        catch (err) { toast((err as Error).message, "bad"); }
+        void run(be.postNotification(title, body, level), "Notification sent").then((ok) => { if (ok) { setTitle(""); setBody(""); setLevel("info"); } });
       }}>
         <div><label className="label" htmlFor="nt">Title</label><input id="nt" className="field" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Wave 2 drops in 10 minutes" /></div>
         <div><label className="label" htmlFor="nb">Message</label><textarea id="nb" className="field h-24" value={body} onChange={(e) => setBody(e.target.value)} placeholder="Details for the teams" /></div>
@@ -40,7 +40,7 @@ export function NotificationsAdmin() {
         {db.notifications.map((n) => (
           <li key={n.id} className={`panel flex items-start justify-between gap-4 px-5 py-3.5 text-[14.5px] ${n.level === "important" ? "border-coral/40" : ""}`}>
             <span><span className="text-[12.5px] text-deep/55">{ago(n.at, now)}{n.level === "important" && ", important"}</span><br /><b>{n.title}</b> {n.body}</span>
-            <button className="btn btn-danger btn-sm" onClick={() => be.deleteNotification(n.id)}>Delete</button>
+            <button className="btn btn-danger btn-sm" onClick={() => run(be.deleteNotification(n.id), "Notification deleted")}>Delete</button>
           </li>
         ))}
         {db.notifications.length === 0 && <li className="text-[14px] text-deep/60">Nothing sent yet.</li>}
@@ -104,6 +104,7 @@ export function Settings() {
   const be = useBackend();
   const db = useDB();
   const toast = useToast();
+  const run = useRun();
   const s = db.settings;
   const [fresh, setFresh] = useState<Credential | null>(null);
   const [confirmFresh, setConfirmFresh] = useState(false);
@@ -113,14 +114,13 @@ export function Settings() {
       <form className="panel grid gap-4 p-6 sm:grid-cols-2" onSubmit={(e) => {
         e.preventDefault();
         const fd = new FormData(e.currentTarget);
-        be.updateSettings({
+        void run(be.updateSettings({
           eventName: String(fd.get("eventName")).trim() || "EcoCypher",
           tagline: String(fd.get("tagline")).trim() || s.tagline,
           durationMinutes: Math.max(10, Number(fd.get("dur")) || 180),
           teamSize: Math.min(8, Math.max(1, Number(fd.get("size")) || 3)),
           submissionsPerMinute: Math.max(1, Number(fd.get("spm")) || 10),
-        });
-        toast("Settings saved", "ok");
+        }), "Settings saved");
       }}>
         <h2 className="text-[17px] font-semibold sm:col-span-2">Event</h2>
         <div><label className="label" htmlFor="en">Event name</label><input id="en" name="eventName" className="field" defaultValue={s.eventName} /></div>
@@ -141,8 +141,7 @@ export function Settings() {
               <form className="grid items-end gap-3 sm:grid-cols-[1fr_2fr_4rem_auto]" onSubmit={(e) => {
                 e.preventDefault();
                 const fd = new FormData(e.currentTarget);
-                be.updateType(t.id, { name: String(fd.get("name")).trim() || t.name, description: String(fd.get("description")), colour: String(fd.get("colour")) });
-                toast(`Saved type ${i + 1}`, "ok");
+                void run(be.updateType(t.id, { name: String(fd.get("name")).trim() || t.name, description: String(fd.get("description")), colour: String(fd.get("colour")) }), `Saved type ${i + 1}`);
               }}>
                 <div><label className="label" htmlFor={`tn${i}`}>Type {i + 1}</label><input id={`tn${i}`} name="name" className="field" defaultValue={t.name} /></div>
                 <div><label className="label" htmlFor={`td${i}`}>Description</label><input id={`td${i}`} name="description" className="field" defaultValue={t.description} /></div>
@@ -157,11 +156,11 @@ export function Settings() {
       <section className="panel p-6">
         <h2 className="text-[17px] font-semibold">Scoreboard</h2>
         <div className="mt-4 flex flex-wrap gap-2">
-          <button className="btn btn-line" onClick={() => { be.updateSettings({ scoreboardVisible: !s.scoreboardVisible }); toast(s.scoreboardVisible ? "Scoreboard hidden from players" : "Scoreboard visible", "ok"); }}>
+          <button className="btn btn-line" onClick={() => run(be.updateSettings({ scoreboardVisible: !s.scoreboardVisible }), s.scoreboardVisible ? "Scoreboard hidden from players" : "Scoreboard visible")}>
             {s.scoreboardVisible ? "Hide scoreboard from players" : "Show scoreboard to players"}</button>
           {s.freezeAt
-            ? <button className="btn btn-line" onClick={() => { be.updateSettings({ freezeAt: null }); toast("Scoreboard unfrozen", "ok"); }}>Unfreeze scoreboard</button>
-            : <button className="btn btn-line" onClick={() => { be.updateSettings({ freezeAt: new Date().toISOString() }); toast("Scoreboard frozen for players", "ok"); }}>Freeze scoreboard now</button>}
+            ? <button className="btn btn-line" onClick={() => run(be.updateSettings({ freezeAt: null }), "Scoreboard unfrozen")}>Unfreeze scoreboard</button>
+            : <button className="btn btn-line" onClick={() => run(be.updateSettings({ freezeAt: new Date().toISOString() }), "Scoreboard frozen for players")}>Freeze scoreboard now</button>}
         </div>
         <p className="mt-2 text-[13px] text-deep/60">Freezing keeps the last stretch a surprise until the reveal. Admins always see live scores.</p>
       </section>
@@ -174,11 +173,11 @@ export function Settings() {
           <li>This GitHub Pages version keeps data in this browser only. Export a backup before clearing browser data.</li>
         </ul>
         <div className="mt-4 flex flex-wrap gap-2">
-          <button className="btn btn-line" onClick={() => downloadText(`ecocypher-backup-${new Date().toISOString().slice(0, 10)}.json`, be.exportJSON(), "application/json")}>Export backup</button>
+          <button className="btn btn-line" onClick={() => run(async () => downloadText(`ecocypher-backup-${new Date().toISOString().slice(0, 10)}.json`, await be.exportJSON(), "application/json"))}>Export backup</button>
           <label className="btn btn-line cursor-pointer">Import backup<input type="file" accept=".json,application/json" className="sr-only" onChange={async (e) => {
             const f = e.target.files?.[0]; if (!f) return;
             if (!confirm("Replace all current data with this backup?")) return;
-            try { be.importJSON(await f.text()); toast("Backup imported", "ok"); } catch (err) { toast((err as Error).message, "bad"); }
+            try { await be.importJSON(await f.text()); toast("Backup imported", "ok"); } catch (err) { toast((err as Error).message, "bad"); }
           }} /></label>
           <button className="btn btn-danger" onClick={() => setConfirmFresh(true)}>Clear everything and start fresh</button>
         </div>

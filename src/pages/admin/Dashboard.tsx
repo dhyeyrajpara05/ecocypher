@@ -2,7 +2,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { BigTimer, useEventClock } from "../../components/chrome";
 import { THEME_INFO } from "../../components/themes";
-import { useToast } from "../../components/ui";
+import { useToast, useRun } from "../../components/ui";
 import { releaseStatus, scoreboard, solves } from "../../data/scoring";
 import { useBackend, useDB, useNow } from "../../data/store";
 import { ago, clock } from "../../lib/format";
@@ -39,6 +39,7 @@ export default function Dashboard() {
   const db = useDB();
   const now = useNow(1000);
   const toast = useToast();
+  const run = useRun();
   const t = useEventClock();
   const rows = scoreboard(db);
   const s = solves(db);
@@ -54,7 +55,7 @@ export default function Dashboard() {
   const name = (id: string) => db.users.find((u) => u.id === id)?.displayName ?? "Unknown";
   const team = (id: string) => db.teams.find((x) => x.id === id)?.name ?? "Unknown team";
   const title = (id: string) => db.challenges.find((c) => c.id === id)?.title ?? "Deleted challenge";
-  const act = (fn: () => void, msg: string) => { try { fn(); toast(msg, "ok"); } catch (e) { toast((e as Error).message, "bad"); } };
+  const act = (fn: () => Promise<unknown>, msg: string) => run(fn, msg);
   const kpis: [string, string | number, string, string][] = [
     ["Teams", db.teams.length, `${players.length} players`, "#1E5B7A"],
     ["Active now", `${active}/${db.teams.length}`, "teams submitting in the last 15 min", "#1F7A5C"],

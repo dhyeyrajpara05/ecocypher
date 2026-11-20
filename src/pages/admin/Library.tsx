@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { THEME_INFO, ThemeArt } from "../../components/themes";
-import { Empty, Modal, TypeChip, useToast } from "../../components/ui";
+import { Empty, Modal, TypeChip, useToast, useRun } from "../../components/ui";
 import type { ChallengeInput } from "../../data/backend";
 import { releaseStatus, solveCounts } from "../../data/scoring";
 import { useBackend, useDB, useNow } from "../../data/store";
@@ -19,6 +19,7 @@ const STATUS: Record<ReleaseStatus, [string, string]> = {
 function EditModal({ c, onClose }: { c: Challenge | null; onClose: () => void }) {
   const be = useBackend();
   const toast = useToast();
+  const run = useRun();
   const [v, setV] = useState<ChallengeInput | null>(null);
   const [seen, setSeen] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -42,6 +43,7 @@ function EditModal({ c, onClose }: { c: Challenge | null; onClose: () => void })
 function ScheduleModal({ c, onClose }: { c: Challenge | null; onClose: () => void }) {
   const be = useBackend();
   const toast = useToast();
+  const run = useRun();
   const [at, setAt] = useState("");
   const [seen, setSeen] = useState<string | null>(null);
   if (c && seen !== c.id) { setSeen(c.id); setAt(toLocalInput(c.releaseAt)); }
@@ -50,7 +52,7 @@ function ScheduleModal({ c, onClose }: { c: Challenge | null; onClose: () => voi
       <label className="label" htmlFor="rel">Release at</label>
       <input id="rel" type="datetime-local" className="field" value={at} onChange={(e) => setAt(e.target.value)} />
       <div className="mt-5 flex justify-end gap-2"><button className="btn btn-line" onClick={onClose}>Cancel</button>
-        <button className="btn btn-kelp" disabled={!at} onClick={() => { if (c) { be.setRelease(c.id, fromLocalInput(at)); toast("Scheduled", "ok"); } setSeen(null); onClose(); }}>Save</button></div>
+        <button className="btn btn-kelp" disabled={!at} onClick={() => { if (c) void run(be.setRelease(c.id, fromLocalInput(at)), "Scheduled"); setSeen(null); onClose(); }}>Save</button></div>
     </Modal>
   );
 }
@@ -60,6 +62,7 @@ export default function Library() {
   const db = useDB();
   const now = useNow(5000);
   const toast = useToast();
+  const run = useRun();
   const counts = solveCounts(db);
   const opens = (id: string) => db.hintUnlocks.filter((h) => h.challengeId === id).length;
   const [editing, setEditing] = useState<Challenge | null>(null);
@@ -70,7 +73,7 @@ export default function Library() {
     { key: "single", title: "Single challenges", list: db.challenges.filter((c) => !c.waveId) },
   ].map((g) => ({ ...g, list: g.list.filter((c) => filter === "all" || releaseStatus(c, now) === filter) })).filter((g) => g.list.length);
 
-  const releaseGroup = (ids: string[]) => { ids.forEach((id) => be.setRelease(id, new Date().toISOString())); toast(`${ids.length} challenge${ids.length === 1 ? "" : "s"} now live`, "ok"); };
+  const releaseGroup = (ids: string[]) => run(async () => { const at = new Date().toISOString(); for (const id of ids) await be.setRelease(id, at); }, `${ids.length} challenge${ids.length === 1 ? "" : "s"} now live`);
 
   return (
     <div>
@@ -108,12 +111,12 @@ export default function Library() {
                       {st === "scheduled" && <span className="block pt-0.5 text-deep/60">{dateTime(c.releaseAt)}</span>}
                     </span>
                     <span className="flex flex-wrap gap-1.5">
-                      {st !== "live" && <button className="btn btn-kelp btn-sm" onClick={() => { be.setRelease(c.id, new Date().toISOString()); toast(`"${c.title}" is live`, "ok"); }}>Release now</button>}
+                      {st !== "live" && <button className="btn btn-kelp btn-sm" onClick={() => run(be.setRelease(c.id, new Date().toISOString()), `"${c.title}" is live`)}>Release now</button>}
                       <button className="btn btn-line btn-sm" onClick={() => setScheduling(c)}>Schedule</button>
-                      {st !== "draft" && <button className="btn btn-line btn-sm" onClick={() => be.setRelease(c.id, null)}>Unpublish</button>}
-                      {c.maxAttempts > 0 && <button className="btn btn-line btn-sm" title="Give every team 3 more attempts" onClick={() => { be.addAttempts(c.id, 3); toast(`"${c.title}" now allows ${c.maxAttempts + 3} attempts`, "ok"); }}>+3 attempts</button>}
+                      {st !== "draft" && <button className="btn btn-line btn-sm" onClick={() => run(be.setRelease(c.id, null), `"${c.title}" unpublished`)}>Unpublish</button>}
+                      {c.maxAttempts > 0 && <button className="btn btn-line btn-sm" title="Give every team 3 more attempts" onClick={() => run(be.addAttempts(c.id, 3), `"${c.title}" now allows ${c.maxAttempts + 3} attempts`)}>+3 attempts</button>}
                       <button className="btn btn-line btn-sm" onClick={() => setEditing(c)}>Edit</button>
-                      <button className="btn btn-danger btn-sm" onClick={() => { if (confirm(`Delete "${c.title}" and its submissions?`)) { be.deleteChallenge(c.id); toast("Deleted"); } }}>Delete</button>
+                      <button className="btn btn-danger btn-sm" onClick={() => { if (confirm(`Delete "${c.title}" and its submissions?`)) void run(be.deleteChallenge(c.id), "Deleted"); }}>Delete</button>
                     </span>
                   </li>
                 );

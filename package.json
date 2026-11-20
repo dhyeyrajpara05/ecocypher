@@ -5,7 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "api:dev": "esbuild src/server/devserver.ts --bundle --platform=node --format=esm --outfile=.dev/api.mjs --log-level=warning && node .dev/api.mjs",
+    "dev:remote": "VITE_BACKEND=remote BASE_PATH=/ vite",
     "build": "tsc -b && vite build",
+    "build:api": "esbuild src/server/vercel.ts --bundle --platform=node --target=node20 --format=esm --outfile=api/_lib/server.mjs --log-level=warning",
+    "build:vercel": "npm run build:api && tsc -b && VITE_BACKEND=remote BASE_PATH=/ vite build",
     "preview": "vite preview",
     "test": "vitest run"
   },
@@ -19,10 +23,12 @@
     "react-router-dom": "^6.30.6"
   },
   "devDependencies": {
+    "@types/node": "^22.20.5",
     "@types/react": "^18.3.31",
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10.6.2",
+    "esbuild": "^0.21.5",
     "jsdom": "^31.0.1",
     "postcss": "^8.5.33",
     "tailwindcss": "^3.4.19",

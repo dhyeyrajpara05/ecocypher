@@ -26,5 +26,8 @@ export default defineConfig({
   base: process.env.BASE_PATH ?? "/ecocypher/",
   plugins: [react(), csp()],
   build: { sourcemap: false },
+  // With `npm run api:dev` running, /api calls go to the local server (dev and preview).
+  server: { proxy: { "/api": "http://localhost:8787" } },
+  preview: { proxy: { "/api": "http://localhost:8787" } },
   test: { environment: "node" },
 } as any);

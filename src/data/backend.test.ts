@@ -77,7 +77,7 @@ describe("flags", () => {
   it("blocks submissions to unreleased challenges and after time is up", async () => {
     await be.loginMember("t4", "t4-u1", DEMO_PLAYER_PASSWORD);
     expect((await be.submitFlag("c6", "ECO{x}")).message).toMatch(/isn't available/);
-    be.logout(); await asAdmin(); be.endEventNow(); be.logout();
+    be.logout(); await asAdmin(); await be.endEventNow(); be.logout();
     await be.loginMember("t4", "t4-u1", DEMO_PLAYER_PASSWORD);
     expect((await be.submitFlag("c7", "ECO{x}")).message).toMatch(/Time's up/);
   });
@@ -88,7 +88,7 @@ describe("flags", () => {
   }, 30_000);
   it("players cannot use admin actions", async () => {
     await be.loginMember("t1", "t1-u1", DEMO_PLAYER_PASSWORD);
-    expect(() => be.startTimer()).toThrow(/Only admins/);
+    await expect(be.startTimer()).rejects.toThrow(/Only admins/);
   });
 });
 
@@ -119,7 +119,7 @@ describe("attempts and hints", () => {
     await be.loginMember("t4", "t4-u1", DEMO_PLAYER_PASSWORD);
     await be.submitFlag(id, "ECO{a}");
     expect(attemptsLeft(be.db(), "t4", be.db().challenges.find((c) => c.id === id)!)).toBe(0);
-    be.logout(); await asAdmin(); be.addAttempts(id, 3); be.logout();
+    be.logout(); await asAdmin(); await be.addAttempts(id, 3); be.logout();
     await be.loginMember("t4", "t4-u1", DEMO_PLAYER_PASSWORD);
     expect((await be.submitFlag(id, "ECO{right}")).correct).toBe(true);
   }, 30_000);
@@ -127,13 +127,13 @@ describe("attempts and hints", () => {
     const id = await limited(0);
     const before = scoreboard(be.db()).find((r) => r.teamId === "t4")!.score;
     await be.loginMember("t4", "t4-u1", DEMO_PLAYER_PASSWORD);
-    expect(be.unlockHint(id, 1).text).toBe("Big clue");
+    expect((await be.unlockHint(id, 1)).text).toBe("Big clue");
     be.logout(); await be.loginMember("t4", "t4-u2", DEMO_PLAYER_PASSWORD);
-    be.unlockHint(id, 1);                                                  // already open: no second charge
+    await be.unlockHint(id, 1);                                                  // already open: no second charge
     const row = scoreboard(be.db()).find((r) => r.teamId === "t4")!;
     expect(row.score).toBe(before - 50);
     expect(row.hintCost).toBe(60);                                         // includes the demo hint
-    expect(() => be.unlockHint(id, 9)).toThrow(/doesn't exist/);
+    await expect(be.unlockHint(id, 9)).rejects.toThrow(/doesn't exist/);
   });
   it("upgrades data saved by the previous version", () => {
     const old = { version: 2, challenges: [{ id: "x", hint: "old hint" }, { id: "y", hint: "" }] };
@@ -163,7 +163,7 @@ describe("admin", () => {
     const c = await be.saveChallenge(null, input("Solo", "ECO{solo}"), null);
     expect(c.waveId).toBeNull();
     expect(releaseStatus(c)).toBe("draft");
-    be.setRelease(c.id, new Date().toISOString());
+    await be.setRelease(c.id, new Date().toISOString());
     expect(releaseStatus(be.db().challenges.find((x) => x.id === c.id)!)).toBe("live");
   });
   it("parses a CSV of challenges for review and reports bad rows", () => {
@@ -173,12 +173,12 @@ describe("admin", () => {
     expect(r.errors).toHaveLength(2);
     expect(r.items[0]).toMatchObject({ title: "Bin Day", theme: "plastics", points: 120, files: [{ name: "map", url: "https://x/y.png" }] });
   });
-  it("runs a three-hour timer", () => {
-    be.resetTimer();
-    be.startTimer();
+  it("runs a three-hour timer", async () => {
+    await be.resetTimer();
+    await be.startTimer();
     const s = be.db().settings;
     expect(Date.parse(s.endsAt!) - Date.parse(s.startsAt!)).toBe(180 * 60_000);
-    be.extendTimer(10);
+    await be.extendTimer(10);
     expect(Date.parse(be.db().settings.endsAt!) - Date.parse(s.startsAt!)).toBe(190 * 60_000);
   });
   it("registers a team of three with working member logins and enforces team size", async () => {
@@ -190,14 +190,14 @@ describe("admin", () => {
     be.logout();
     expect((await be.loginMember(team.id, member.id, creds[1].password)).mustChangePassword).toBe(true);
   }, 30_000);
-  it("posts notifications newest first", () => {
-    be.postNotification("Wave 2 is live", "Five new challenges.", "important");
+  it("posts notifications newest first", async () => {
+    await be.postNotification("Wave 2 is live", "Five new challenges.", "important");
     expect(be.db().notifications[0]).toMatchObject({ title: "Wave 2 is live", level: "important" });
   });
-  it("refuses a backup with no admin", () => {
-    const d = JSON.parse(be.exportJSON());
+  it("refuses a backup with no admin", async () => {
+    const d = JSON.parse(await be.exportJSON());
     d.users = d.users.filter((u: { role: string }) => u.role !== "admin");
-    expect(() => be.importJSON(JSON.stringify(d))).toThrow(/locked out/);
+    await expect(be.importJSON(JSON.stringify(d))).rejects.toThrow(/locked out/);
   });
 });
 

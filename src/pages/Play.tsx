@@ -52,10 +52,10 @@ function ChallengeModal({ c, onClose }: { c: Challenge | null; onClose: () => vo
     return who ? (who.id === user.id ? "you" : who.displayName.split(" ")[0]) : "your team";
   };
 
-  function openHint(i: number) {
+  async function openHint(i: number) {
     if (!c) return;
     try {
-      be.unlockHint(c.id, i);
+      await be.unlockHint(c.id, i);
       setConfirmHint(null);
       const cost = c.hints[i].cost;
       toast(cost ? `Hint opened. ${cost} points came off your team's score.` : "Hint opened.", "ok");

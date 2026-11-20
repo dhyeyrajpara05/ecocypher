@@ -88,12 +88,12 @@ export default function Post() {
       if (mode === "wave") {
         await be.postWave(slots, rel);
         toast(`Wave ${nextWave} ${when === "now" ? "is live" : when === "draft" ? "saved as a draft" : "is scheduled"}`, "ok");
-        if (when === "now") be.postNotification(`Wave ${nextWave} is live`, "Five new challenges just dropped. Good luck!", "info");
+        if (when === "now") await be.postNotification(`Wave ${nextWave} is live`, "Five new challenges just dropped. Good luck!", "info");
         setSlots(Array.from({ length: WAVE_SIZE }, () => blankChallenge(firstType)));
       } else {
         const c = await be.saveChallenge(null, single, rel);
         toast(`"${c.title}" ${when === "now" ? "is live" : when === "draft" ? "saved as a draft" : "is scheduled"}`, "ok");
-        if (when === "now") be.postNotification("New challenge live", `${c.title} (${c.points} points) is now open.`, "info");
+        if (when === "now") await be.postNotification("New challenge live", `${c.title} (${c.points} points) is now open.`, "info");
         setSingle(blankChallenge(firstType));
       }
       nav("../library");

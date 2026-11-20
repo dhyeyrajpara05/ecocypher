@@ -60,7 +60,8 @@ export default function Admin() {
       </aside>
       <div className="min-w-0">
         <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-fin-200/60 bg-foam/90 px-5 py-3 backdrop-blur sm:px-8">
-          <p className="text-[14px] text-deep/70">{db.settings.eventName}{db.demo && <span className="ml-2 rounded-full bg-brass-100 px-2 py-0.5 text-[12px] font-semibold text-brass-600">Demo data</span>}</p>
+          <p className="text-[14px] text-deep/70">{db.settings.eventName}{db.demo && <span className="ml-2 rounded-full bg-brass-100 px-2 py-0.5 text-[12px] font-semibold text-brass-600">Demo data</span>}
+            {import.meta.env.VITE_BACKEND !== "remote" && <span className="ml-2 rounded-full bg-coral-100 px-2 py-0.5 text-[12px] font-semibold text-coral" title="Changes stay in this browser. Players on other devices won't see them. Use the Vercel version for the real event.">This browser only</span>}</p>
           <div className="flex items-center gap-2">
             <TimerPill />
             <button className="btn btn-line btn-sm lg:hidden" onClick={() => { be.logout(); nav("/"); }}>Log out</button>

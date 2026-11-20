@@ -2,19 +2,33 @@ import { createContext, useContext, useEffect, useState, useSyncExternalStore, t
 import { AnimatePresence } from "framer-motion";
 import { Loader } from "../components/Loader";
 import { LocalBackend, type Backend } from "./backend";
+import { RemoteBackend } from "./remote";
 import { browserCipher } from "./vault";
 
 const Ctx = createContext<Backend | null>(null);
 
 export function BackendProvider({ children }: { children: ReactNode }) {
-  const [be] = useState<Backend>(() => new LocalBackend(window.localStorage, browserCipher()));
+  // The Vercel build talks to the shared server; the GitHub Pages build keeps data in this browser.
+  const [be] = useState<Backend>(() => import.meta.env.VITE_BACKEND === "remote" ? new RemoteBackend() : new LocalBackend(window.localStorage, browserCipher()));
   const [ready, setReady] = useState(false);
+  const [failed, setFailed] = useState("");
   const [minDone, setMinDone] = useState(false);
   const [hold, setHold] = useState(true);
-  useEffect(() => { be.ready().then(() => setReady(true)); }, [be]);
+  useEffect(() => { be.ready().then(() => setReady(true), (e: Error) => setFailed(e.message || "Can't reach the server.")); }, [be]);
   // Keep the loading page up long enough to be seen, then let the name finish decrypting.
   useEffect(() => { const t = setTimeout(() => setMinDone(true), 1700); return () => clearTimeout(t); }, []);
   useEffect(() => { if (ready && minDone) { const t = setTimeout(() => setHold(false), 450); return () => clearTimeout(t); } }, [ready, minDone]);
+  if (failed) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-deep px-6 text-center text-white">
+        <div>
+          <p className="font-display text-[26px] font-bold">The tank is offline</p>
+          <p className="mt-2 max-w-md text-aqua/80">{failed}</p>
+          <button className="btn btn-brass mt-6" onClick={() => location.reload()}>Try again</button>
+        </div>
+      </div>
+    );
+  }
   return (
     <>
       {ready && <Ctx.Provider value={be}>{children}</Ctx.Provider>}

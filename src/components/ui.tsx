@@ -76,6 +76,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 }
 export const useToast = () => useContext(ToastCtx);
 
+/** Runs a backend action, then shows `ok` as a toast, or the error if the server refused it. */
+export function useRun() {
+  const toast = useContext(ToastCtx);
+  return async (action: Promise<unknown> | (() => Promise<unknown>), ok?: string) => {
+    try {
+      await (typeof action === "function" ? action() : action);
+      if (ok) toast(ok, "ok");
+      return true;
+    } catch (e) { toast((e as Error).message, "bad"); return false; }
+  };
+}
+
 export function Empty({ title, children }: { title: string; children?: ReactNode }) {
   return (
     <div className="rounded-2xl border border-dashed border-fin-200 bg-white/60 px-6 py-10 text-center">

@@ -5,6 +5,14 @@ every flag they capture is investment from the sharks.
 
 Created by **DEAKIN RESEARCH & TECHNOLOGY CLUB**.
 
+
+## Live event vs. demo
+
+- **GitHub Pages** (this repo's Pages site): data is stored in each browser. Good for demos and trying
+  things out; admin changes do **not** reach other devices.
+- **Vercel**: one shared database, flags checked on the server, every admin change reaches every player
+  within about 3 seconds. Use this for the real event. Setup steps: [docs/VERCEL.md](docs/VERCEL.md).
+
 ## Features
 
 - **Team login**: each team is registered with its members (3 by default). A member picks their team, then their

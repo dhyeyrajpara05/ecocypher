@@ -29,40 +29,40 @@ export interface Backend {
   logout(): void;
   changePassword(current: string, next: string): Promise<void>;
   submitFlag(challengeId: string, value: string): Promise<SubmitResult>;
-  unlockHint(challengeId: string, index: number): Hint;
+  unlockHint(challengeId: string, index: number): Promise<Hint>;
   // admin: event
-  updateSettings(patch: Partial<Settings>): void;
-  startTimer(): void;
-  extendTimer(minutes: number): void;
-  endEventNow(): void;
-  resetTimer(): void;
-  updateType(id: string, patch: Partial<ChallengeType>): void;
+  updateSettings(patch: Partial<Settings>): Promise<void>;
+  startTimer(): Promise<void>;
+  extendTimer(minutes: number): Promise<void>;
+  endEventNow(): Promise<void>;
+  resetTimer(): Promise<void>;
+  updateType(id: string, patch: Partial<ChallengeType>): Promise<void>;
   // admin: challenges
   postWave(items: ChallengeInput[], releaseAt: string | null): Promise<Challenge[]>;
   saveChallenge(id: string | null, input: ChallengeInput, releaseAt?: string | null): Promise<Challenge>;
-  setRelease(id: string, releaseAt: string | null): void;
-  addAttempts(id: string, extra: number): void;
-  deleteChallenge(id: string): void;
+  setRelease(id: string, releaseAt: string | null): Promise<void>;
+  addAttempts(id: string, extra: number): Promise<void>;
+  deleteChallenge(id: string): Promise<void>;
   parseChallengeFile(text: string): ParsedFile;
   // admin: people
   createTeam(name: string, members: string[]): Promise<Credential[]>;
   importTeams(csv: string): Promise<{ credentials: Credential[]; errors: string[] }>;
-  renameTeam(id: string, name: string): void;
-  deleteTeam(id: string): void;
+  renameTeam(id: string, name: string): Promise<void>;
+  deleteTeam(id: string): Promise<void>;
   addMember(teamId: string, displayName: string): Promise<Credential>;
   resetPassword(userId: string): Promise<Credential>;
-  deleteUser(userId: string): void;
+  deleteUser(userId: string): Promise<void>;
   // admin: notifications and data
-  postNotification(title: string, body: string, level: NoticeLevel): void;
-  deleteNotification(id: string): void;
-  exportJSON(): string;
-  importJSON(text: string): void;
+  postNotification(title: string, body: string, level: NoticeLevel): Promise<void>;
+  deleteNotification(id: string): Promise<void>;
+  exportJSON(): Promise<string>;
+  importJSON(text: string): Promise<void>;
   startFresh(): Promise<Credential>;
   loadDemo(): Promise<void>;
 }
 
-const KEY = "ecocypher:data";
-const SESSION = "ecocypher:session";
+export const KEY = "ecocypher:data";
+export const SESSION = "ecocypher:session";
 export const THEMES: ThemeKey[] = ["plastics", "energy", "water", "ewaste", "food", "climate"];
 
 export class BackendError extends Error {}
@@ -107,6 +107,40 @@ export function migrate(d: any): DB | null {
     d.version = 3;
   }
   return d?.version === 3 ? (d as DB) : null;
+}
+
+/** Reads challenges from CSV or a JSON array, for review in the form before posting. */
+export function parseChallengeText(text: string, types: ChallengeType[]): ParsedFile {
+  let rows: Record<string, unknown>[] = [];
+  const t = text.trim();
+  if (t.startsWith("[")) {
+    try { rows = JSON.parse(t); } catch { throw new BackendError("That JSON could not be read. Check for a missing comma or bracket."); }
+  } else {
+    const csv = parseCSV(t);
+    if (csv.length < 2) throw new BackendError("The CSV needs a header row and at least one challenge.");
+    const head = csv[0].map((h) => h.toLowerCase());
+    rows = csv.slice(1).map((r) => Object.fromEntries(head.map((h, i) => [h, r[i] ?? ""])));
+  }
+  const items: ChallengeInput[] = [];
+  const errors: string[] = [];
+  rows.forEach((it, i) => {
+    const n = `Row ${i + 1}`;
+    const key = String(it.type ?? "").toLowerCase();
+    const type = types.find((x) => x.id.toLowerCase() === key || x.name.toLowerCase() === key);
+    const theme = String(it.theme ?? "plastics").toLowerCase().replace(/[^a-z]/g, "") as ThemeKey;
+    const points = Number(it.points);
+    if (!String(it.title ?? "").trim()) return errors.push(`${n}: missing title`);
+    if (!type) return errors.push(`${n}: unknown type "${it.type ?? ""}"`);
+    if (!(points > 0)) return errors.push(`${n}: points must be a number above 0`);
+    if (!String(it.flag ?? "").trim()) return errors.push(`${n}: missing flag`);
+    const files = Array.isArray(it.files) ? (it.files as { name: string; url: string }[])
+      : String(it.files ?? "").split(";").map((p) => p.split("|")).filter((p) => p[0]?.trim() && p[1]?.trim()).map(([name, url]) => ({ name: name.trim(), url: url.trim() }));
+    items.push({ typeId: type.id, theme: THEMES.includes(theme) ? theme : "plastics", title: String(it.title).trim(), description: String(it.description ?? ""),
+      points, flag: String(it.flag).trim(), caseSensitive: String(it.caseSensitive ?? it.case_sensitive ?? "").toLowerCase() === "true",
+      files, hidden: false, maxAttempts: Math.max(0, Math.round(Number(it.attempts ?? it.max_attempts ?? 0)) || 0),
+      hints: Array.isArray(it.hints) ? (it.hints as Hint[]) : String(it.hint ?? "").trim() ? [{ text: String(it.hint).trim(), cost: Math.max(0, Number(it.hint_cost ?? it.hintCost ?? 0) || 0) }] : [] });
+  });
+  return { items, errors };
 }
 
 export class LocalBackend implements Backend {
@@ -230,7 +264,7 @@ export class LocalBackend implements Backend {
   }
 
   /** Opens a hint for the whole team. Its cost comes off the team's score straight away. */
-  unlockHint(challengeId: string, index: number): Hint {
+  async unlockHint(challengeId: string, index: number): Promise<Hint> {
     const u = this.requireUser();
     if (u.role !== "player" || !u.teamId) throw new BackendError("Only team members can open hints.");
     const c = this.state.challenges.find((x) => x.id === challengeId);
@@ -244,20 +278,20 @@ export class LocalBackend implements Backend {
   }
 
   // ---------------------------------------------------------------- admin: event
-  updateSettings(patch: Partial<Settings>) { this.requireAdmin(); this.commit((d) => { d.settings = { ...d.settings, ...patch }; }); }
-  startTimer() {
+  async updateSettings(patch: Partial<Settings>) { this.requireAdmin(); this.commit((d) => { d.settings = { ...d.settings, ...patch }; }); }
+  async startTimer() {
     this.requireAdmin();
     const now = Date.now();
     this.commit((d) => { d.settings.startsAt = new Date(now).toISOString(); d.settings.endsAt = new Date(now + d.settings.durationMinutes * 60_000).toISOString(); });
   }
-  extendTimer(minutes: number) {
+  async extendTimer(minutes: number) {
     this.requireAdmin();
     if (!this.state.settings.endsAt) throw new BackendError("Start the timer first.");
     this.commit((d) => { d.settings.endsAt = new Date(Date.parse(d.settings.endsAt!) + minutes * 60_000).toISOString(); });
   }
-  endEventNow() { this.requireAdmin(); this.commit((d) => { d.settings.endsAt = new Date().toISOString(); }); }
-  resetTimer() { this.requireAdmin(); this.commit((d) => { d.settings.startsAt = null; d.settings.endsAt = null; }); }
-  updateType(id: string, patch: Partial<ChallengeType>) {
+  async endEventNow() { this.requireAdmin(); this.commit((d) => { d.settings.endsAt = new Date().toISOString(); }); }
+  async resetTimer() { this.requireAdmin(); this.commit((d) => { d.settings.startsAt = null; d.settings.endsAt = null; }); }
+  async updateType(id: string, patch: Partial<ChallengeType>) {
     this.requireAdmin();
     this.commit((d) => { const t = d.types.find((x) => x.id === id); if (t) Object.assign(t, patch, { id }); });
   }
@@ -309,19 +343,19 @@ export class LocalBackend implements Backend {
     });
     return c;
   }
-  setRelease(id: string, releaseAt: string | null) {
+  async setRelease(id: string, releaseAt: string | null) {
     this.requireAdmin();
     this.commit((d) => { const c = d.challenges.find((x) => x.id === id); if (c) c.releaseAt = releaseAt; });
   }
   /** Gives every team more wrong guesses on a challenge. Also works if the limit was 0 (it becomes a limit). */
-  addAttempts(id: string, extra: number) {
+  async addAttempts(id: string, extra: number) {
     this.requireAdmin();
     const c = this.state.challenges.find((x) => x.id === id);
     if (!c) throw new BackendError("That challenge no longer exists.");
     if (c.maxAttempts === 0) throw new BackendError("This challenge already has unlimited attempts.");
     this.commit((d) => { const x = d.challenges.find((y) => y.id === id)!; x.maxAttempts = Math.max(1, x.maxAttempts + extra); });
   }
-  deleteChallenge(id: string) {
+  async deleteChallenge(id: string) {
     this.requireAdmin();
     this.commit((d) => {
       d.challenges = d.challenges.filter((c) => c.id !== id);
@@ -336,38 +370,7 @@ export class LocalBackend implements Backend {
    * `type` is a type name or id; `theme` one of plastics, energy, water, ewaste, food, climate; `files` is "name|url;name|url".
    * Returns the parsed challenges so the admin can review them in the form before posting.
    */
-  parseChallengeFile(text: string): ParsedFile {
-    let rows: Record<string, unknown>[] = [];
-    const t = text.trim();
-    if (t.startsWith("[")) {
-      try { rows = JSON.parse(t); } catch { throw new BackendError("That JSON could not be read. Check for a missing comma or bracket."); }
-    } else {
-      const csv = parseCSV(t);
-      if (csv.length < 2) throw new BackendError("The CSV needs a header row and at least one challenge.");
-      const head = csv[0].map((h) => h.toLowerCase());
-      rows = csv.slice(1).map((r) => Object.fromEntries(head.map((h, i) => [h, r[i] ?? ""])));
-    }
-    const items: ChallengeInput[] = [];
-    const errors: string[] = [];
-    rows.forEach((it, i) => {
-      const n = `Row ${i + 1}`;
-      const key = String(it.type ?? "").toLowerCase();
-      const type = this.state.types.find((x) => x.id.toLowerCase() === key || x.name.toLowerCase() === key);
-      const theme = String(it.theme ?? "plastics").toLowerCase().replace(/[^a-z]/g, "") as ThemeKey;
-      const points = Number(it.points);
-      if (!String(it.title ?? "").trim()) return errors.push(`${n}: missing title`);
-      if (!type) return errors.push(`${n}: unknown type "${it.type ?? ""}"`);
-      if (!(points > 0)) return errors.push(`${n}: points must be a number above 0`);
-      if (!String(it.flag ?? "").trim()) return errors.push(`${n}: missing flag`);
-      const files = Array.isArray(it.files) ? (it.files as { name: string; url: string }[])
-        : String(it.files ?? "").split(";").map((p) => p.split("|")).filter((p) => p[0]?.trim() && p[1]?.trim()).map(([name, url]) => ({ name: name.trim(), url: url.trim() }));
-      items.push({ typeId: type.id, theme: THEMES.includes(theme) ? theme : "plastics", title: String(it.title).trim(), description: String(it.description ?? ""),
-        points, flag: String(it.flag).trim(), caseSensitive: String(it.caseSensitive ?? it.case_sensitive ?? "").toLowerCase() === "true",
-        files, hidden: false, maxAttempts: Math.max(0, Math.round(Number(it.attempts ?? it.max_attempts ?? 0)) || 0),
-        hints: Array.isArray(it.hints) ? (it.hints as Hint[]) : String(it.hint ?? "").trim() ? [{ text: String(it.hint).trim(), cost: Math.max(0, Number(it.hint_cost ?? it.hintCost ?? 0) || 0) }] : [] });
-    });
-    return { items, errors };
-  }
+  parseChallengeFile(text: string): ParsedFile { return parseChallengeText(text, this.state.types); }
 
   // ---------------------------------------------------------------- admin: people
   private async newMember(teamId: string, teamName: string, displayName: string, index: number, taken: Set<string>): Promise<{ user: User; cred: Credential }> {
@@ -412,12 +415,12 @@ export class LocalBackend implements Backend {
     return { credentials, errors };
   }
 
-  renameTeam(id: string, name: string) {
+  async renameTeam(id: string, name: string) {
     this.requireAdmin();
     if (!name.trim()) throw new BackendError("Team name can't be empty.");
     this.commit((d) => { const t = d.teams.find((x) => x.id === id); if (t) t.name = name.trim(); });
   }
-  deleteTeam(id: string) {
+  async deleteTeam(id: string) {
     this.requireAdmin();
     this.commit((d) => {
       d.teams = d.teams.filter((t) => t.id !== id);
@@ -446,22 +449,22 @@ export class LocalBackend implements Backend {
     this.commit((d) => { const x = d.users.find((y) => y.id === userId)!; x.passwordSalt = salt; x.passwordHash = hash; x.mustChangePassword = true; });
     return { team: this.state.teams.find((t) => t.id === u.teamId)?.name ?? "(admin)", displayName: u.displayName, username: u.username, password };
   }
-  deleteUser(userId: string) {
+  async deleteUser(userId: string) {
     const me = this.requireAdmin();
     if (userId === me.id) throw new BackendError("You can't delete your own account while logged in.");
     this.commit((d) => { d.users = d.users.filter((u) => u.id !== userId); });
   }
 
   // ---------------------------------------------------------------- admin: notifications and data
-  postNotification(title: string, body: string, level: NoticeLevel) {
+  async postNotification(title: string, body: string, level: NoticeLevel) {
     this.requireAdmin();
     if (!title.trim() && !body.trim()) throw new BackendError("Write a title or a message.");
     this.commit((d) => d.notifications.unshift({ id: randomId("n-"), title: title.trim(), body: body.trim(), level, at: new Date().toISOString() }));
   }
-  deleteNotification(id: string) { this.requireAdmin(); this.commit((d) => { d.notifications = d.notifications.filter((a) => a.id !== id); }); }
+  async deleteNotification(id: string) { this.requireAdmin(); this.commit((d) => { d.notifications = d.notifications.filter((a) => a.id !== id); }); }
 
-  exportJSON() { this.requireAdmin(); return JSON.stringify(this.state, null, 2); }
-  importJSON(text: string) {
+  async exportJSON() { this.requireAdmin(); return JSON.stringify(this.state, null, 2); }
+  async importJSON(text: string) {
     this.requireAdmin();
     let d: DB;
     try { d = JSON.parse(text); } catch { throw new BackendError("That file isn't a valid EcoCypher backup."); }

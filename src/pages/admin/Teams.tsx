@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Empty, Modal, useToast } from "../../components/ui";
+import { Empty, Modal, useToast, useRun } from "../../components/ui";
 import type { Credential } from "../../data/backend";
 import { scoreboard } from "../../data/scoring";
 import { useBackend, useDB } from "../../data/store";
@@ -28,6 +28,7 @@ export default function Teams() {
   const be = useBackend();
   const db = useDB();
   const toast = useToast();
+  const run = useRun();
   const [name, setName] = useState("");
   const [members, setMembers] = useState<string[]>([]);
   const [creds, setCreds] = useState<Credential[] | null>(null);
@@ -74,7 +75,7 @@ export default function Teams() {
               <li key={t.id} className="panel p-5">
                 <div className="flex items-start justify-between gap-3">
                   <input className="min-w-0 flex-1 rounded-lg border border-transparent bg-transparent px-1 font-display text-[17px] font-semibold hover:border-fin-200 focus:border-kelp focus:outline-none"
-                    defaultValue={t.name} aria-label="Team name" onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== t.name) { try { be.renameTeam(t.id, v); toast("Team renamed", "ok"); } catch (err) { toast((err as Error).message, "bad"); } } }} />
+                    defaultValue={t.name} aria-label="Team name" onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== t.name) { try { void run(be.renameTeam(t.id, v), "Team renamed"); } catch (err) { toast((err as Error).message, "bad"); } } }} />
                   <span className="text-right text-[13px] text-deep/60"><b className="font-display text-[18px] text-deep">{r?.score ?? 0}</b> pts<br />rank {r?.rank ?? "-"}</span>
                 </div>
                 <table className="mt-3 w-full text-[14px]">
@@ -87,7 +88,7 @@ export default function Teams() {
                           <td className="tabular text-right">{m?.points ?? 0} pts</td>
                           <td className="whitespace-nowrap pl-3 text-right">
                             <button className="btn btn-line btn-sm" onClick={async () => setCreds([await be.resetPassword(u.id)])}>Reset password</button>{" "}
-                            <button className="btn btn-danger btn-sm" aria-label={`Remove ${u.displayName}`} onClick={() => { if (confirm(`Remove ${u.displayName}? Their solves stay with the team.`)) be.deleteUser(u.id); }}>Remove</button>
+                            <button className="btn btn-danger btn-sm" aria-label={`Remove ${u.displayName}`} onClick={() => { if (confirm(`Remove ${u.displayName}? Their solves stay with the team.`)) void run(be.deleteUser(u.id), `${u.displayName} removed`); }}>Remove</button>
                           </td>
                         </tr>
                       );
@@ -96,7 +97,7 @@ export default function Teams() {
                 </table>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button className="btn btn-line btn-sm" onClick={async () => { const n = prompt("New member's name"); if (n?.trim()) setCreds([await be.addMember(t.id, n)]); }}>Add member</button>
-                  <button className="btn btn-danger btn-sm ml-auto" onClick={() => { if (confirm(`Delete ${t.name}, its members and all its submissions?`)) { be.deleteTeam(t.id); toast("Team deleted"); } }}>Delete team</button>
+                  <button className="btn btn-danger btn-sm ml-auto" onClick={() => { if (confirm(`Delete ${t.name}, its members and all its submissions?`)) void run(be.deleteTeam(t.id), "Team deleted"); }}>Delete team</button>
                 </div>
               </li>
             );
