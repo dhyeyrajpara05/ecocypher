@@ -86,6 +86,12 @@ describe("database settings", () => {
     const kv = kvFromEnv({ STORAGE_KV_REST_API_URL: "https://x.upstash.io", STORAGE_KV_REST_API_READ_ONLY_TOKEN: "ro", STORAGE_KV_REST_API_TOKEN: "rw" });
     expect(kv).toBeInstanceOf(UpstashKV);
     expect((kv as unknown as { token: string }).token).toBe("rw");
-    expect(() => kvFromEnv({})).toThrow(/No database/);
+    expect(() => kvFromEnv({})).toThrow(/No database variables found/);
+    const viaRedisUrl = kvFromEnv({ STORAGE_URL: "rediss://default:AbC123@funny-cat-1234.upstash.io:6379" }) as unknown as { url: string; token: string };
+    expect(viaRedisUrl.url).toBe("https://funny-cat-1234.upstash.io");
+    expect(viaRedisUrl.token).toBe("AbC123");
+    const viaPair = kvFromEnv({ STORAGE_URL: "https://funny-cat-1234.upstash.io", STORAGE_TOKEN: "tok" }) as unknown as { token: string };
+    expect(viaPair.token).toBe("tok");
+    expect(() => kvFromEnv({ STORAGE_THING: "x" })).toThrow(/found: STORAGE_THING/);
   });
 });

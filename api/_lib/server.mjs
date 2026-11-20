@@ -1092,18 +1092,49 @@ var UpstashKV = class {
   }
 };
 function kvFromEnv(env) {
+  const keys = Object.keys(env).sort();
   const find = (...ends) => {
     for (const end of ends) {
-      const exact = env[end];
-      if (exact) return exact;
-      const key = Object.keys(env).sort().find((k) => k.endsWith(`_${end}`) && !k.includes("READ_ONLY") && env[k]);
+      if (env[end]) return env[end];
+      const key = keys.find((k) => k.endsWith(`_${end}`) && !k.includes("READ_ONLY") && env[k]);
       if (key) return env[key];
     }
     return void 0;
   };
-  const url = find("KV_REST_API_URL", "REST_API_URL", "UPSTASH_REDIS_REST_URL", "REDIS_REST_URL");
-  const token = find("KV_REST_API_TOKEN", "REST_API_TOKEN", "UPSTASH_REDIS_REST_TOKEN", "REDIS_REST_TOKEN");
-  if (!url || !token) throw new Error("No database connected. In Vercel, add Upstash Redis from the Storage tab, then redeploy.");
+  let url = find("KV_REST_API_URL", "REST_API_URL", "UPSTASH_REDIS_REST_URL", "REDIS_REST_URL");
+  let token = find("KV_REST_API_TOKEN", "REST_API_TOKEN", "UPSTASH_REDIS_REST_TOKEN", "REDIS_REST_TOKEN");
+  if (!url || !token) {
+    for (const k of keys) {
+      const v = env[k] ?? "";
+      if (/^https:\/\/[^/]+\.upstash\.io/.test(v)) {
+        const t = env[k.replace(/URL$/, "TOKEN")];
+        if (t && !k.includes("READ_ONLY")) {
+          url = v;
+          token = t;
+          break;
+        }
+      }
+    }
+  }
+  if (!url || !token) {
+    for (const k of keys) {
+      const v = env[k] ?? "";
+      if (!/^rediss?:\/\//.test(v)) continue;
+      try {
+        const u = new URL(v);
+        if (u.password && u.hostname.endsWith("upstash.io")) {
+          url = `https://${u.hostname}`;
+          token = decodeURIComponent(u.password);
+          break;
+        }
+      } catch {
+      }
+    }
+  }
+  if (!url || !token) {
+    const seen = keys.filter((k) => /KV|REDIS|UPSTASH|STORAGE/.test(k));
+    throw new Error(`No database connected. In Vercel, add Upstash Redis from the Storage tab, then redeploy.${seen.length ? ` (Database variables found: ${seen.join(", ")})` : " (No database variables found in this deployment.)"}`);
+  }
   return new UpstashKV(url, token);
 }
 

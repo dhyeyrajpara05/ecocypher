@@ -67,21 +67,46 @@ export class UpstashKV implements KV {
 
 /**
  * Picks the database from environment variables. Vercel's Upstash integration names them with
- * whatever prefix was chosen when connecting (KV_REST_API_URL, STORAGE_KV_REST_API_URL, ...),
- * so any variable ending in REST_API_URL / REST_API_TOKEN (or REDIS_REST_URL / _TOKEN) is accepted.
+ * whatever prefix was chosen when connecting, and newer setups may only give a rediss:// URL, so:
+ *  1. any variable ending in REST_API_URL / REST_API_TOKEN (or REDIS_REST_URL / _TOKEN), else
+ *  2. an https://….upstash.io URL with a matching *_TOKEN variable, else
+ *  3. a rediss://default:<token>@<host> URL (Upstash uses the same token for REST).
  */
 export function kvFromEnv(env: Record<string, string | undefined>): KV {
+  const keys = Object.keys(env).sort();
   const find = (...ends: string[]) => {
     for (const end of ends) {
-      const exact = env[end];
-      if (exact) return exact;
-      const key = Object.keys(env).sort().find((k) => k.endsWith(`_${end}`) && !k.includes("READ_ONLY") && env[k]);
+      if (env[end]) return env[end];
+      const key = keys.find((k) => k.endsWith(`_${end}`) && !k.includes("READ_ONLY") && env[k]);
       if (key) return env[key];
     }
     return undefined;
   };
-  const url = find("KV_REST_API_URL", "REST_API_URL", "UPSTASH_REDIS_REST_URL", "REDIS_REST_URL");
-  const token = find("KV_REST_API_TOKEN", "REST_API_TOKEN", "UPSTASH_REDIS_REST_TOKEN", "REDIS_REST_TOKEN");
-  if (!url || !token) throw new Error("No database connected. In Vercel, add Upstash Redis from the Storage tab, then redeploy.");
+  let url = find("KV_REST_API_URL", "REST_API_URL", "UPSTASH_REDIS_REST_URL", "REDIS_REST_URL");
+  let token = find("KV_REST_API_TOKEN", "REST_API_TOKEN", "UPSTASH_REDIS_REST_TOKEN", "REDIS_REST_TOKEN");
+
+  if (!url || !token) {
+    for (const k of keys) {
+      const v = env[k] ?? "";
+      if (/^https:\/\/[^/]+\.upstash\.io/.test(v)) {
+        const t = env[k.replace(/URL$/, "TOKEN")];
+        if (t && !k.includes("READ_ONLY")) { url = v; token = t; break; }
+      }
+    }
+  }
+  if (!url || !token) {
+    for (const k of keys) {
+      const v = env[k] ?? "";
+      if (!/^rediss?:\/\//.test(v)) continue;
+      try {
+        const u = new URL(v);
+        if (u.password && u.hostname.endsWith("upstash.io")) { url = `https://${u.hostname}`; token = decodeURIComponent(u.password); break; }
+      } catch { /* not a URL */ }
+    }
+  }
+  if (!url || !token) {
+    const seen = keys.filter((k) => /KV|REDIS|UPSTASH|STORAGE/.test(k));
+    throw new Error(`No database connected. In Vercel, add Upstash Redis from the Storage tab, then redeploy.${seen.length ? ` (Database variables found: ${seen.join(", ")})` : " (No database variables found in this deployment.)"}`);
+  }
   return new UpstashKV(url, token);
 }
