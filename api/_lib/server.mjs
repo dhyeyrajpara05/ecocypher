@@ -840,30 +840,52 @@ var LocalBackend = class {
 };
 
 // src/data/view.ts
-var stripUser = (u, keepUsername) => ({ ...u, passwordHash: "", passwordSalt: "", username: keepUsername ? u.username : "" });
+var omit = (o, keys) => {
+  const c = { ...o };
+  for (const k of keys) delete c[k];
+  return c;
+};
+var SECRET_USER = ["passwordHash", "passwordSalt"];
+var SECRET_CHALLENGE = ["flagHash", "flagSalt"];
+var publicUser = (u) => ({ id: u.id, displayName: u.displayName, role: u.role, teamId: u.teamId });
+var stubChallenge = (c) => ({
+  id: c.id,
+  waveId: c.waveId,
+  typeId: c.typeId,
+  theme: c.theme,
+  points: c.points,
+  releaseAt: c.releaseAt,
+  title: "",
+  description: "",
+  files: [],
+  hints: [],
+  maxAttempts: 0,
+  hidden: false,
+  caseSensitive: false
+});
+var publicSolve = (s) => ({ teamId: s.teamId, userId: s.userId, challengeId: s.challengeId, correct: true, at: s.at });
 function publicView(db, me, now = /* @__PURE__ */ new Date()) {
   const v = structuredClone(db);
-  for (const c of v.challenges) {
-    c.flagHash = "";
-    c.flagSalt = "";
-  }
   if (me?.role === "admin") {
-    v.users = v.users.map((u) => stripUser(u, true));
+    v.users = v.users.map((u) => omit(u, SECRET_USER));
+    v.challenges = v.challenges.map((c) => omit(c, SECRET_CHALLENGE));
     return v;
   }
   const team = me?.teamId ?? null;
   const t = now.getTime();
   const frozen = db.settings.freezeAt && Date.parse(db.settings.freezeAt) <= t ? Date.parse(db.settings.freezeAt) : null;
   const othersVisible = (teamId, at) => teamId === team || db.settings.scoreboardVisible && (frozen === null || Date.parse(at) <= frozen);
-  v.users = v.users.filter((u) => u.role === "player" || u.id === me?.id).map((u) => stripUser(u, u.id === me?.id));
-  v.challenges = v.challenges.filter((c) => !c.hidden && releaseStatus(c, now) === "live");
-  for (const c of v.challenges) {
+  v.users = db.users.filter((u) => u.role === "player" || u.id === me?.id).map((u) => u.id === me?.id ? omit(u, SECRET_USER) : publicUser(u));
+  const live = db.challenges.filter((c) => !c.hidden && releaseStatus(c, now) === "live");
+  v.challenges = me ? live.map((c) => {
     const open = team ? unlockedHints(db, team, c.id) : /* @__PURE__ */ new Set();
-    c.hints = c.hints.map((h, i) => ({ cost: h.cost, text: open.has(i) ? h.text : "" }));
-  }
-  const live = new Set(v.challenges.map((c) => c.id));
-  v.submissions = v.submissions.filter((s) => live.has(s.challengeId) && (s.teamId === team || s.correct) && othersVisible(s.teamId, s.at)).map((s) => s.teamId === team ? s : { ...s, value: "" });
-  v.hintUnlocks = v.hintUnlocks.filter((h) => othersVisible(h.teamId, h.at));
+    return { ...omit(c, SECRET_CHALLENGE), hints: c.hints.map((h, i) => ({ cost: h.cost, text: open.has(i) ? h.text : "" })) };
+  }) : live.map(stubChallenge);
+  const liveIds = new Set(live.map((c) => c.id));
+  v.submissions = db.submissions.filter((s) => liveIds.has(s.challengeId) && othersVisible(s.teamId, s.at) && (s.correct || team !== null && s.teamId === team)).map((s) => team !== null && s.teamId === team ? { ...s } : publicSolve(s));
+  v.hintUnlocks = db.hintUnlocks.filter((h) => othersVisible(h.teamId, h.at)).map((h) => team !== null && h.teamId === team ? { ...h } : { teamId: h.teamId, challengeId: h.challengeId, index: h.index, cost: h.cost, at: h.at });
+  const liveWaves = new Set(live.map((c) => c.waveId).filter(Boolean));
+  v.waves = db.waves.filter((w) => liveWaves.has(w.id));
   return v;
 }
 function viewChangeTimes(db) {

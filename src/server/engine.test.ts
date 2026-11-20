@@ -35,6 +35,34 @@ describe("server", () => {
     expect(body.view.users.some((u) => u.role === "admin")).toBe(false);
   }, 30_000);
 
+  it("removes secret fields entirely, for every kind of visitor", async () => {
+    const a = await adminToken();
+    const p = await playerToken();
+    for (const tok of [null, p, a]) {
+      const text = JSON.stringify((await state(tok)).body.view);
+      for (const key of ["passwordHash", "passwordSalt", "flagHash", "flagSalt"]) expect(text).not.toContain(`"${key}"`);
+    }
+  }, 30_000);
+
+  it("gives anonymous visitors only what the home, login and scoreboard pages need", async () => {
+    const v = (await state(null)).body.view;
+    expect(v.challenges.length).toBeGreaterThan(0);
+    expect(v.challenges.every((c) => c.title === "" && c.description === "" && c.files.length === 0 && c.hints.length === 0)).toBe(true);
+    expect(v.users.every((u) => Object.keys(u).sort().join() === "displayName,id,role,teamId")).toBe(true);
+    expect(v.submissions.every((s) => s.correct && !("value" in s) && !("id" in s))).toBe(true);
+    expect(v.hintUnlocks.every((h) => !("userId" in h))).toBe(true);
+  }, 30_000);
+
+  it("never sends a player another team's guesses or typed values", async () => {
+    const p = await playerToken();                       // team t4
+    const v = (await state(p)).body.view;
+    const others = v.submissions.filter((s) => s.teamId !== "t4");
+    expect(others.length).toBeGreaterThan(0);
+    expect(others.every((s) => s.correct && !("value" in s) && !("id" in s))).toBe(true);
+    expect(v.users.filter((u) => u.id !== "t4-u1").every((u) => !("username" in u) && !("mustChangePassword" in u))).toBe(true);
+    expect(v.waves.every((w) => v.challenges.some((c) => c.waveId === w.id))).toBe(true);
+  }, 30_000);
+
   it("an admin's change reaches a player on their next check", async () => {
     const a = await adminToken();
     const p = await playerToken();
