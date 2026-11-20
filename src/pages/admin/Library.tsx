@@ -83,6 +83,12 @@ export default function Library() {
       <PageHead title="Challenge library" actions={<><Link className="btn btn-kelp" to="../post">Post a wave</Link><Link className="btn btn-line" to="../post?mode=single">Post a single challenge</Link></>}>
         Every challenge you've posted. Release drafts, reschedule, edit, hide or delete.
       </PageHead>
+      {!db.settings.startsAt && db.challenges.some((c) => releaseStatus(c, now) === "live") && (
+        <p className="mb-5 rounded-2xl border border-brass/40 bg-brass-100/60 px-4 py-3 text-[14px]">
+          Some challenges are live, but the <b>3-hour clock hasn't started</b>, so players can read them but can't submit flags or open hints yet.
+          Start it from the <Link className="font-semibold text-kelp underline" to="..">Dashboard</Link>.
+        </p>
+      )}
       <div className="mb-5 flex flex-wrap gap-2" role="group" aria-label="Filter by status">
         {(["all", "live", "scheduled", "draft"] as const).map((f) => (
           <button key={f} onClick={() => setFilter(f)} className={`chip px-3.5 py-1.5 text-[13px] ${filter === f ? "bg-deep text-white" : "bg-white ring-1 ring-fin-200"}`}>
