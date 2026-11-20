@@ -85,7 +85,7 @@ export default function Library() {
       </PageHead>
       {!db.settings.startsAt && db.challenges.some((c) => releaseStatus(c, now) === "live") && (
         <p className="mb-5 rounded-2xl border border-brass/40 bg-brass-100/60 px-4 py-3 text-[14px]">
-          Some challenges are live, but the <b>3-hour clock hasn't started</b>, so players can read them but can't submit flags or open hints yet.
+          Some challenges are live, but the <b>event clock hasn't started</b>, so players can read them but can't submit flags or open hints yet.
           Start it from the <Link className="font-semibold text-kelp underline" to="..">Dashboard</Link>.
         </p>
       )}

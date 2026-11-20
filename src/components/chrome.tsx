@@ -1,6 +1,6 @@
-import { eventStatus } from "../data/scoring";
+import { clockName, eventStatus } from "../data/scoring";
 import { useDB, useNow } from "../data/store";
-import { countdown } from "../lib/format";
+import { countdown, elapsed } from "../lib/format";
 
 /** Shared footer on every page. */
 export function Footer({ dark = false }: { dark?: boolean }) {
@@ -20,19 +20,22 @@ export function useEventClock() {
   const now = useNow(1000);
   const status = eventStatus(db, now);
   const { startsAt, endsAt, durationMinutes } = db.settings;
+  // No time limit: once started, the clock counts up and never runs low.
+  const unlimited = status === "live" ? !endsAt : status === "not-started" && durationMinutes === 0;
   const total = startsAt && endsAt ? Date.parse(endsAt) - Date.parse(startsAt) : durationMinutes * 60_000;
-  const left = status === "live" && endsAt ? Date.parse(endsAt) - now.getTime() : status === "ended" ? 0 : total;
+  const left = unlimited ? Infinity : status === "live" && endsAt ? Date.parse(endsAt) - now.getTime() : status === "ended" ? 0 : total;
   return {
-    status, left, total,
-    text: status === "live" && endsAt ? countdown(endsAt, now) : status === "ended" ? "0:00:00" : `${Math.floor(durationMinutes / 60)}:${String(durationMinutes % 60).padStart(2, "0")}:00`,
-    fraction: total ? Math.min(1, Math.max(0, 1 - left / total)) : 0,
+    status, left, total, unlimited, name: clockName(status === "not-started" ? durationMinutes : endsAt && startsAt ? Math.round(total / 60_000) : 0),
+    text: unlimited ? (status === "live" ? elapsed(startsAt!, now) : "∞")
+      : status === "live" && endsAt ? countdown(endsAt, now) : status === "ended" ? "0:00:00" : `${Math.floor(durationMinutes / 60)}:${String(durationMinutes % 60).padStart(2, "0")}:00`,
+    fraction: unlimited ? 0 : total ? Math.min(1, Math.max(0, 1 - left / total)) : 0,
   };
 }
 
 export function TimerPill({ dark = false }: { dark?: boolean }) {
   const t = useEventClock();
   const low = t.status === "live" && t.left < 15 * 60_000;
-  const label = t.status === "live" ? "left" : t.status === "ended" ? "Time's up" : "Not started";
+  const label = t.status === "live" ? (t.unlimited ? "elapsed" : "left") : t.status === "ended" ? "Time's up" : t.unlimited ? "No time limit" : "Not started";
   return (
     <span role="timer" aria-live="off" aria-label={`Event timer ${t.text} ${label}`}
       className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[13px] font-semibold ${low ? "bg-coral text-white" : dark ? "bg-white/10 text-white" : "bg-deep text-white"}`}>
@@ -56,7 +59,9 @@ export function BigTimer({ dark = true }: { dark?: boolean }) {
       <div role="timer" aria-label={`Time remaining ${t.text}`}>
         <p className={`font-display text-[40px] font-bold leading-none tabular ${dark ? "text-white" : "text-deep"}`}>{t.text}</p>
         <p className={`mt-2 text-[14px] ${dark ? "text-aqua/80" : "text-deep/70"}`}>
-          {t.status === "live" ? "left on the clock" : t.status === "ended" ? "Time's up. Submissions are closed." : "The 3-hour clock starts at kickoff."}
+          {t.status === "live" ? (t.unlimited ? "elapsed. No time limit." : "left on the clock")
+            : t.status === "ended" ? "Time's up. Submissions are closed."
+            : t.unlimited ? "No time limit. The clock starts at kickoff." : `The ${t.name} starts at kickoff.`}
         </p>
       </div>
     </div>

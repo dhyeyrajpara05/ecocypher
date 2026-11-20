@@ -27,6 +27,14 @@ export function countdown(toIso: string, now = new Date()) {
   return `${h > 0 ? `${h}:` : ""}${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+/** Time since an ISO moment as H:MM:SS, for a clock with no time limit. */
+export function elapsed(fromIso: string, now = new Date()) {
+  let s = Math.max(0, Math.floor((now.getTime() - Date.parse(fromIso)) / 1000));
+  const h = Math.floor(s / 3600); s -= h * 3600;
+  const m = Math.floor(s / 60); s -= m * 60;
+  return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
 /** For <input type="datetime-local"> */
 export function toLocalInput(iso: string | null) {
   if (!iso) return "";

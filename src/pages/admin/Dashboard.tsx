@@ -70,9 +70,10 @@ export default function Dashboard() {
           <div className="flex flex-wrap items-center justify-between gap-6">
             <BigTimer />
             <div className="flex flex-col gap-2">
-              {t.status === "not-started" && <button className="btn btn-brass" onClick={() => { if (confirm(`Start the ${db.settings.durationMinutes / 60}-hour clock now? Flags open immediately.`)) act(() => be.startTimer(), "The clock is running"); }}>Start the {db.settings.durationMinutes / 60}-hour clock</button>}
+              {t.status === "not-started" && <button className="btn btn-brass" onClick={() => { if (confirm(`Start the ${t.name} now? Flags open immediately.${t.unlimited ? " There's no time limit: the event runs until you press End now." : ""}`)) act(() => be.startTimer(), "The clock is running"); }}>Start the {t.name}</button>}
               {t.status === "live" && <>
-                <button className="btn btn-ghost-light btn-sm" onClick={() => act(() => be.extendTimer(10), "Added 10 minutes")}>Add 10 minutes</button>
+                {!t.unlimited && <button className="btn btn-ghost-light btn-sm" onClick={() => act(() => be.extendTimer(10), "Added 10 minutes")}>Add 10 minutes</button>}
+                {!t.unlimited && <button className="btn btn-ghost-light btn-sm" onClick={() => { if (confirm("Remove the time limit? The event keeps running until you press End now.")) act(() => be.updateSettings({ endsAt: null, durationMinutes: 0 }), "Time limit removed"); }}>Remove time limit</button>}
                 <button className="btn btn-ghost-light btn-sm" onClick={() => { if (confirm("End the event now? Submissions close immediately.")) act(() => be.endEventNow(), "Event ended"); }}>End now</button>
               </>}
               {t.status !== "not-started" && <button className="btn btn-ghost-light btn-sm" onClick={() => { if (confirm("Reset the clock? The event goes back to not started.")) act(() => be.resetTimer(), "Clock reset"); }}>Reset clock</button>}

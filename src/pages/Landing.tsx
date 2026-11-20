@@ -7,7 +7,7 @@ import { SiteHeader } from "../components/SiteHeader";
 import { Tank } from "../components/Tank";
 import { THEME_INFO, ThemeArt } from "../components/themes";
 import { CountUp } from "../components/ui";
-import { scoreboard, visibleChallenges } from "../data/scoring";
+import { scoreboard, visibleChallenges, clockName } from "../data/scoring";
 import { useDB, useNow, useUser } from "../data/store";
 import type { ThemeKey } from "../data/types";
 
@@ -40,7 +40,7 @@ export default function Landing() {
               {db.settings.tagline}
             </motion.h1>
             <p className="mt-6 max-w-lg text-[17px] leading-relaxed text-aqua/90">
-              {db.settings.eventName} is a three-hour sustainability capture-the-flag. Your team is a startup in the tank. Every flag you
+              {db.settings.eventName} is a {db.settings.durationMinutes ? clockName(db.settings.durationMinutes).replace(" clock", "") : "team"} sustainability capture-the-flag. Your team is a startup in the tank. Every flag you
               capture is investment from the sharks.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">

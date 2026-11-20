@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend, migrate, parseCSV, type ChallengeInput } from "./backend";
 import { DEMO_ADMIN, DEMO_PLAYER_PASSWORD } from "./seed";
-import { attemptsLeft, releaseStatus, scoreboard, visibleChallenges } from "./scoring";
+import { attemptsLeft, eventStatus, releaseStatus, scoreboard, visibleChallenges } from "./scoring";
 import type { Cipher } from "./vault";
 import type { DB } from "./types";
 
@@ -191,6 +191,20 @@ describe("soundboard", () => {
     const m = migrate({ version: 3, challenges: [], hintUnlocks: [] })!;
     expect(m.version).toBe(4);
     expect(m.soundboard.cues.outOfAttempts.sound).toBe("builtin:game-over");
+  });
+});
+
+describe("no time limit", () => {
+  it("runs until an admin ends it, counting up, and can't be extended", async () => {
+    await asAdmin();
+    await be.resetTimer();
+    await be.updateSettings({ durationMinutes: 0 });
+    await be.startTimer();
+    expect(be.db().settings.endsAt).toBeNull();
+    expect(eventStatus(be.db(), new Date(Date.now() + 30 * 24 * 3600_000))).toBe("live");
+    await expect(be.extendTimer(10)).rejects.toThrow(/no time limit/);
+    await be.endEventNow();
+    expect(eventStatus(be.db(), new Date(Date.now() + 1000))).toBe("ended");
   });
 });
 

@@ -323,11 +323,13 @@ export class LocalBackend implements Backend {
   async startTimer() {
     this.requireAdmin();
     const now = Date.now();
-    this.commit((d) => { d.settings.startsAt = new Date(now).toISOString(); d.settings.endsAt = new Date(now + d.settings.durationMinutes * 60_000).toISOString(); });
+    // durationMinutes 0 = no time limit: the event runs until an admin presses "End now".
+    this.commit((d) => { d.settings.startsAt = new Date(now).toISOString(); d.settings.endsAt = d.settings.durationMinutes > 0 ? new Date(now + d.settings.durationMinutes * 60_000).toISOString() : null; });
   }
   async extendTimer(minutes: number) {
     this.requireAdmin();
-    if (!this.state.settings.endsAt) throw new BackendError("Start the timer first.");
+    if (!this.state.settings.startsAt) throw new BackendError("Start the timer first.");
+    if (!this.state.settings.endsAt) throw new BackendError("The event has no time limit, so there's nothing to extend.");
     this.commit((d) => { d.settings.endsAt = new Date(Date.parse(d.settings.endsAt!) + minutes * 60_000).toISOString(); });
   }
   async endEventNow() { this.requireAdmin(); this.commit((d) => { d.settings.endsAt = new Date().toISOString(); }); }

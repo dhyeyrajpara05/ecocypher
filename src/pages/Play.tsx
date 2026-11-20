@@ -123,7 +123,7 @@ function ChallengeModal({ c, onClose }: { c: Challenge | null; onClose: () => vo
             <div className="mt-6">
               <p className="label">Hints</p>
               {!solve && clockState.status !== "live" && (
-                <p className="mb-2 text-[13px] text-deep/60">{clockState.status === "ended" ? "Time's up, so hints can no longer be opened." : "Hints can be opened once the 3-hour clock starts."}</p>
+                <p className="mb-2 text-[13px] text-deep/60">{clockState.status === "ended" ? "Time's up, so hints can no longer be opened." : "Hints can be opened once the event clock starts."}</p>
               )}
               <ul className="space-y-2">
                 {c.hints.map((h, i) => (
@@ -158,7 +158,7 @@ function ChallengeModal({ c, onClose }: { c: Challenge | null; onClose: () => vo
                 <b>Deal done.</b> {solver?.id === user.id ? "You" : solver?.displayName ?? "Your team"} solved this {ago(solve.at)} for {c.points} points.
               </motion.p>
             ) : clockState.status !== "live" ? (
-              <p className="rounded-2xl border border-brass/40 bg-brass-100/60 px-4 py-3 text-[15px] text-deep/80">{clockState.status === "ended" ? <><b>Time's up.</b> Flags can no longer be submitted.</> : <><b>The flag box opens when the 3-hour clock starts.</b> The organisers start it at kickoff; this page updates by itself.</>}</p>
+              <p className="rounded-2xl border border-brass/40 bg-brass-100/60 px-4 py-3 text-[15px] text-deep/80">{clockState.status === "ended" ? <><b>Time's up.</b> Flags can no longer be submitted.</> : <><b>The flag box opens when the event clock starts.</b> The organisers start it at kickoff; this page updates by itself.</>}</p>
             ) : left <= 0 ? (
               <p className="rounded-2xl bg-coral-100/60 px-4 py-3 text-[15px] text-deep/80"><b>Out of attempts.</b> Your team used all {c.maxAttempts} on this one. An organiser can add more if they choose.</p>
             ) : (

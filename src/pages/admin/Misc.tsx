@@ -117,14 +117,14 @@ export function Settings() {
         void run(be.updateSettings({
           eventName: String(fd.get("eventName")).trim() || "EcoCypher",
           tagline: String(fd.get("tagline")).trim() || s.tagline,
-          durationMinutes: Math.max(10, Number(fd.get("dur")) || 180),
+          durationMinutes: fd.get("unlimited") ? 0 : Math.max(10, Number(fd.get("dur")) || 180),
           teamSize: Math.min(8, Math.max(1, Number(fd.get("size")) || 3)),
           submissionsPerMinute: Math.max(1, Number(fd.get("spm")) || 10),
         }), "Settings saved");
       }}>
         <h2 className="text-[17px] font-semibold sm:col-span-2">Event</h2>
         <div><label className="label" htmlFor="en">Event name</label><input id="en" name="eventName" className="field" defaultValue={s.eventName} /></div>
-        <div><label className="label" htmlFor="dur">Clock length (minutes)</label><input id="dur" name="dur" type="number" min={10} className="field" defaultValue={s.durationMinutes} /></div>
+        <ClockLength minutes={s.durationMinutes} />
         <div className="sm:col-span-2"><label className="label" htmlFor="tl">Homepage headline</label><input id="tl" name="tagline" className="field" defaultValue={s.tagline} /></div>
         <div><label className="label" htmlFor="size">Members per team</label><input id="size" name="size" type="number" min={1} max={8} className="field" defaultValue={s.teamSize} /></div>
         <div><label className="label" htmlFor="spm">Flag attempts per member per minute</label><input id="spm" name="spm" type="number" min={1} className="field" defaultValue={s.submissionsPerMinute} /></div>
@@ -193,6 +193,21 @@ export function Settings() {
         <p className="mt-4 rounded-2xl bg-foam p-4 font-mono text-[15px]">username: {fresh?.username}<br />password: {fresh?.password}</p>
         <div className="mt-5 flex justify-end"><button className="btn btn-kelp" onClick={() => setFresh(null)}>I've saved it</button></div>
       </Modal>
+    </div>
+  );
+}
+
+/** Clock length in minutes, or no time limit. */
+function ClockLength({ minutes }: { minutes: number }) {
+  const [unlimited, setUnlimited] = useState(minutes === 0);
+  return (
+    <div>
+      <label className="label" htmlFor="dur">Clock length (minutes)</label>
+      <input id="dur" name="dur" type="number" min={10} className="field" defaultValue={minutes || 180} disabled={unlimited} />
+      <label className="mt-1.5 flex items-center gap-2 text-[13px]">
+        <input type="checkbox" name="unlimited" checked={unlimited} onChange={(e) => setUnlimited(e.target.checked)} />
+        No time limit (runs until you press End now)
+      </label>
     </div>
   );
 }

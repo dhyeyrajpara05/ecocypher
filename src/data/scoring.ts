@@ -12,6 +12,12 @@ export function visibleChallenges(db: DB, now: Date = new Date()): Challenge[] {
 }
 
 export type EventStatus = "not-started" | "live" | "ended";
+/** "3-hour clock", "90-minute clock" or "event clock" (no time limit), for labels. */
+export function clockName(minutes: number): string {
+  if (!minutes) return "event clock";
+  return minutes % 60 === 0 ? `${minutes / 60}-hour clock` : `${minutes}-minute clock`;
+}
+
 export function eventStatus(db: DB, now: Date = new Date()): EventStatus {
   const { startsAt, endsAt } = db.settings;
   if (!startsAt || now.getTime() < Date.parse(startsAt)) return "not-started";
