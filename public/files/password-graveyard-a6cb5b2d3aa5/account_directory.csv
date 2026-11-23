@@ -1,0 +1,13 @@
+record_id,username,account_status,last_login
+REC-101,library_guest,guest,2026-10-29
+REC-102,legacy_student,inactive,2025-08-14
+REC-103,event_volunteer,inactive,2025-08-14
+REC-104,media_lab,service,2026-11-12
+REC-105,admin,active,2026-11-17
+REC-106,sports_portal,inactive,2025-08-14
+REC-107,demo_account,test,2026-03-02
+REC-108,test_runner,test,2026-03-02
+REC-109,finance_archive,archived,2024-12-01
+REC-110,old_webmaster,inactive,2025-08-14
+REC-111,old_club_user,inactive,2025-08-14
+REC-112,helpdesk_temp,inactive,2025-08-14

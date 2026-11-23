@@ -1,0 +1,25 @@
+THE PASSWORD GRAVEYARD
+Difficulty: Level 3 (Medium)
+Category: Python / Encoding / String Manipulation
+
+A cybersecurity club has recovered a text file containing password strings
+from an old college system.
+
+A note says: "The passwords aren't encrypted. They're just hiding in plain
+sight."
+
+The strings have been transformed using reversible techniques. Some records
+use one transformation; others use multiple layers.
+
+You have been provided with:
+- password_dump.txt: recovered strings linked to record IDs
+- account_directory.csv: account names and account status
+- recovery_notes.txt: notes left by the person who collected the dump
+
+Use Python to identify the transformations, recover the passwords and
+determine which password belongs to the active administrator account.
+
+Submit the recovered password in this format:
+SHARK{recovered_password}
+
+Use lowercase exactly as recovered.

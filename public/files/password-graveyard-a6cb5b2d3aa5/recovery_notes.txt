@@ -1,0 +1,21 @@
+RECOVERY NOTES
+==============
+
+The dump was copied from an old system. The strings are not encrypted with
+a secret key. They have been transformed using simple reversible operations.
+
+Possible operations used in this dump:
+- Base64 encoding
+- hexadecimal representation of text bytes
+- ROT13 letter substitution
+- reversing the character order
+
+A record may have gone through more than one operation. When operations are
+layered, undo them in the reverse order in which they were applied.
+
+The account directory and password dump use the same record_id.
+Not every recovered password belongs to a currently active account.
+
+For this exercise, identify the password associated with the active
+administrator account. Do not assume that the most obvious decoded string
+is the answer.
