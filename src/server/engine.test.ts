@@ -63,6 +63,17 @@ describe("server", () => {
     expect(v.waves.every((w) => v.challenges.some((c) => c.waveId === w.id))).toBe(true);
   }, 30_000);
 
+  it("shows players and visitors no challenges until the event clock starts", async () => {
+    const a = await adminToken();
+    const p = await playerToken();
+    await call(a, "resetTimer");
+    expect((await state(p)).body.view.challenges).toHaveLength(0);
+    expect((await state(null)).body.view.challenges).toHaveLength(0);
+    expect((await state(a)).body.view.challenges.length).toBeGreaterThan(0);      // admins still see everything
+    await call(a, "startTimer");
+    expect((await state(p)).body.view.challenges.length).toBeGreaterThan(0);
+  }, 30_000);
+
   it("an admin's change reaches a player on their next check", async () => {
     const a = await adminToken();
     const p = await playerToken();
@@ -72,6 +83,7 @@ describe("server", () => {
     const after = await state(p, before.body.v, before.body.now);
     expect(after.status).toBe(200);
     expect(after.body.view.settings.startsAt).toBeNull();
+    await call(a, "startTimer");                                                  // challenges show only once it runs
     await call(a, "setRelease", "c8", new Date(Date.now() - 1000).toISOString());
     expect((await state(p, after.body.v, after.body.now)).body.view.challenges.some((c) => c.id === "c8")).toBe(true);
     await call(a, "setRelease", "c8", null);

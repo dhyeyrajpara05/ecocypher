@@ -7,7 +7,9 @@ export function releaseStatus(c: Challenge, now: Date = new Date()): ReleaseStat
 }
 
 /** Challenges a player can see: released and not hidden. Drafts and scheduled ones are never shown. */
+/** Challenges players can see: released, not hidden, and only once the event clock has started. */
 export function visibleChallenges(db: DB, now: Date = new Date()): Challenge[] {
+  if (eventStatus(db, now) === "not-started") return [];
   return db.challenges.filter((c) => !c.hidden && releaseStatus(c, now) === "live");
 }
 

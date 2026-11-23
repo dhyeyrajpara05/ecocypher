@@ -11,7 +11,7 @@ import { BigTimer, Footer, useEventClock } from "../components/chrome";
 import { SiteHeader } from "../components/SiteHeader";
 import { THEME_INFO, ThemeArt } from "../components/themes";
 import { CountUp, Empty, Modal, TypeChip, useToast } from "../components/ui";
-import { attemptsLeft, scoreboard, solveCounts, solves, unlockedHints, visibleChallenges, wrongAttempts } from "../data/scoring";
+import { attemptsLeft, eventStatus, scoreboard, solveCounts, solves, unlockedHints, visibleChallenges, wrongAttempts } from "../data/scoring";
 import { useBackend, useDB, useNow, useUser } from "../data/store";
 import type { Challenge } from "../data/types";
 import { ago, clock } from "../lib/format";
@@ -246,6 +246,7 @@ export default function Play() {
   const counts = solveCounts(db);
   const mySolved = new Set(solves(db).filter((s) => s.teamId === user.teamId).map((s) => s.challengeId));
   const visible = visibleChallenges(db, now).filter((c) => typeFilter === "all" || c.typeId === typeFilter);
+  const clockStatus = eventStatus(db, now);
   const current = db.challenges.find((c) => c.id === openId) ?? null;
   const waves = [...db.waves].sort((a, b) => b.number - a.number);
   const singles = visible.filter((c) => !c.waveId).sort((a, b) => Date.parse(b.releaseAt!) - Date.parse(a.releaseAt!));
@@ -298,7 +299,9 @@ export default function Play() {
         </div>
 
         {visible.length === 0 ? (
-          <div className="mt-8"><Empty title="No challenges are live yet">New challenges appear here the moment the organisers post them. This page updates on its own.</Empty></div>
+          <div className="mt-8">{clockStatus === "not-started"
+            ? <Empty title="Challenges unlock when the event starts">Nothing is shown until the organisers start the event clock. Get your team ready; this page updates on its own the moment it begins.</Empty>
+            : <Empty title="No challenges are live yet">New challenges appear here the moment the organisers post them. This page updates on its own.</Empty>}</div>
         ) : (
           <>
             {singles.length > 0 && (

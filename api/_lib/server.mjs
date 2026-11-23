@@ -1000,7 +1000,8 @@ function publicView(db, me, now = /* @__PURE__ */ new Date()) {
   const frozen = db.settings.freezeAt && Date.parse(db.settings.freezeAt) <= t ? Date.parse(db.settings.freezeAt) : null;
   const othersVisible = (teamId, at) => teamId === team || db.settings.scoreboardVisible && (frozen === null || Date.parse(at) <= frozen);
   v.users = db.users.filter((u) => u.role === "player" || u.id === me?.id).map((u) => u.id === me?.id ? omit(u, SECRET_USER) : publicUser(u));
-  const live = db.challenges.filter((c) => !c.hidden && releaseStatus(c, now) === "live");
+  const started = eventStatus(db, now) !== "not-started";
+  const live = started ? db.challenges.filter((c) => !c.hidden && releaseStatus(c, now) === "live") : [];
   v.challenges = me ? live.map((c) => {
     const open = team ? unlockedHints(db, team, c.id) : /* @__PURE__ */ new Set();
     return { ...omit(c, SECRET_CHALLENGE), hints: c.hints.map((h, i) => ({ cost: h.cost, text: open.has(i) ? h.text : "" })) };

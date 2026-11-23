@@ -9,7 +9,7 @@
  *   team has opened. Other teams' wrong guesses, typed values and record ids are never sent.
  * - Admins get everything except the secrets above.
  */
-import { releaseStatus, unlockedHints } from "./scoring";
+import { eventStatus, releaseStatus, unlockedHints } from "./scoring";
 import type { Challenge, DB, Submission, User } from "./types";
 
 type Loose = Record<string, unknown>;
@@ -50,7 +50,9 @@ export function publicView(db: DB, me: User | null, now = new Date()): DB {
   v.users = db.users.filter((u) => u.role === "player" || u.id === me?.id)
     .map((u) => (u.id === me?.id ? omit(u, SECRET_USER) : publicUser(u)));
 
-  const live = db.challenges.filter((c) => !c.hidden && releaseStatus(c, now) === "live");
+  // Before the event clock starts, players and visitors see no challenges at all (not even titles).
+  const started = eventStatus(db, now) !== "not-started";
+  const live = started ? db.challenges.filter((c) => !c.hidden && releaseStatus(c, now) === "live") : [];
   v.challenges = me
     ? live.map((c) => {
         const open = team ? unlockedHints(db, team, c.id) : new Set<number>();
