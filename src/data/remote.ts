@@ -129,6 +129,6 @@ export class RemoteBackend implements Backend {
   deleteNotification(id: string) { return this.call<void>("deleteNotification", id); }
   exportJSON() { return this.call<string>("exportJSON"); }
   importJSON(text: string) { return this.call<void>("importJSON", text); }
-  startFresh() { return this.call<Credential>("startFresh"); }
+  startFresh() { return this.call<void>("startFresh"); }
   loadDemo() { return this.call<void>("loadDemo"); }
 }

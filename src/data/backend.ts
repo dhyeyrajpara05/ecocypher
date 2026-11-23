@@ -7,7 +7,7 @@
  * (see docs/VERCEL.md). The UI only talks to this interface.
  */
 import { hashFlag, hashPassword, randomId, randomSalt, sameHash, tempPassword } from "./crypto";
-import { demoDB, freshDB, makeUser } from "./seed";
+import { demoDB, emptyDB, makeUser } from "./seed";
 import { attemptsLeft, eventStatus, releaseStatus, solves, unlockedHints, WAVE_SIZE } from "./scoring";
 import { BUILTIN_SOUNDS, CUE_KEYS, defaultSoundboard, MAX_SOUND_BYTES } from "./sounds";
 import type { Challenge, ChallengeType, Cue, CueKey, DB, Hint, NoticeLevel, Settings, SoundMeta, SubmitResult, Team, ThemeKey, User } from "./types";
@@ -67,7 +67,8 @@ export interface Backend {
   deleteNotification(id: string): Promise<void>;
   exportJSON(): Promise<string>;
   importJSON(text: string): Promise<void>;
-  startFresh(): Promise<Credential>;
+  /** Clears the event but keeps the admin who pressed it (same password), the settings, types and soundboard. */
+  startFresh(): Promise<void>;
   loadDemo(): Promise<void>;
 }
 
@@ -583,13 +584,17 @@ export class LocalBackend implements Backend {
     this.state = d; this.persist(); this.emit();
   }
   async startFresh() {
-    this.requireAdmin();
-    const password = tempPassword();
-    const d = await freshDB({ username: "admin", password });
+    const me = this.requireAdmin();
+    const old = this.state;
+    const d = emptyDB();
+    // Keep who you are and how the event is set up; wipe everything that happened in it.
+    d.users = [{ ...me, mustChangePassword: false }];
+    d.settings = { ...old.settings, startsAt: null, endsAt: null, freezeAt: null };
+    d.types = old.types;
+    d.soundboard = old.soundboard;
     this.state = d; this.persist();
-    this.storage.setItem(SESSION, d.users[0].id);
+    this.storage.setItem(SESSION, me.id);
     this.emit();
-    return { team: "(admin)", displayName: "Event admin", username: "admin", password };
   }
   async loadDemo() {
     this.state = await demoDB(); this.persist();

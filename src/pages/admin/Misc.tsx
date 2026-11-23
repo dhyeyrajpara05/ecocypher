@@ -106,7 +106,6 @@ export function Settings() {
   const toast = useToast();
   const run = useRun();
   const s = db.settings;
-  const [fresh, setFresh] = useState<Credential | null>(null);
   const [confirmFresh, setConfirmFresh] = useState(false);
   return (
     <div className="max-w-3xl space-y-6">
@@ -184,14 +183,9 @@ export function Settings() {
       </section>
 
       <Modal open={confirmFresh} onClose={() => setConfirmFresh(false)} title="Start fresh?">
-        <p className="text-[14.5px]">This deletes every team, challenge, wave, notification and submission in this browser, including the demo data, and creates a new admin login. Export a backup first if you might need it.</p>
+        <p className="text-[14.5px]">This deletes every team, member, challenge, wave, notification, submission and score, and resets the clock. Your admin login, the event settings, challenge types and soundboard stay as they are. Export a backup first if you might need it.</p>
         <div className="mt-5 flex justify-end gap-2"><button className="btn btn-line" onClick={() => setConfirmFresh(false)}>Keep my data</button>
-          <button className="btn btn-danger" onClick={async () => { setConfirmFresh(false); setFresh(await be.startFresh()); }}>Delete and start fresh</button></div>
-      </Modal>
-      <Modal open={!!fresh} onClose={() => setFresh(null)} title="Your new admin login">
-        <p className="text-[14.5px]">Write this down. You'll be asked to change the password next time you log in.</p>
-        <p className="mt-4 rounded-2xl bg-foam p-4 font-mono text-[15px]">username: {fresh?.username}<br />password: {fresh?.password}</p>
-        <div className="mt-5 flex justify-end"><button className="btn btn-kelp" onClick={() => setFresh(null)}>I've saved it</button></div>
+          <button className="btn btn-danger" onClick={async () => { setConfirmFresh(false); await run(be.startFresh(), "Everything cleared. You're still logged in with your current password."); }}>Delete and start fresh</button></div>
       </Modal>
     </div>
   );

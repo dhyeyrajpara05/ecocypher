@@ -942,14 +942,17 @@ var LocalBackend = class {
     this.emit();
   }
   async startFresh() {
-    this.requireAdmin();
-    const password = tempPassword();
-    const d = await freshDB({ username: "admin", password });
+    const me = this.requireAdmin();
+    const old = this.state;
+    const d = emptyDB();
+    d.users = [{ ...me, mustChangePassword: false }];
+    d.settings = { ...old.settings, startsAt: null, endsAt: null, freezeAt: null };
+    d.types = old.types;
+    d.soundboard = old.soundboard;
     this.state = d;
     this.persist();
-    this.storage.setItem(SESSION, d.users[0].id);
+    this.storage.setItem(SESSION, me.id);
     this.emit();
-    return { team: "(admin)", displayName: "Event admin", username: "admin", password };
   }
   async loadDemo() {
     this.state = await demoDB();

@@ -208,6 +208,25 @@ describe("no time limit", () => {
   });
 });
 
+describe("start fresh", () => {
+  it("wipes the event but keeps the admin's own password and the soundboard", async () => {
+    await asAdmin();
+    await be.updateCue("wrong", { sound: "builtin:abhi-maza", text: "nope", seconds: 3 });
+    await be.startFresh();
+    const d = be.db();
+    expect(d.teams).toHaveLength(0);
+    expect(d.challenges).toHaveLength(0);
+    expect(d.submissions).toHaveLength(0);
+    expect(d.users).toHaveLength(1);
+    expect(d.soundboard.cues.wrong.text).toBe("nope");
+    expect(d.settings.startsAt).toBeNull();
+    expect(be.currentUser()?.role).toBe("admin");
+    be.logout();
+    await be.login(DEMO_ADMIN.username, DEMO_ADMIN.password);           // same password still works
+    expect(be.currentUser()?.mustChangePassword).toBe(false);
+  });
+});
+
 describe("admin", () => {
   beforeEach(asAdmin);
   it("posts a wave of exactly five challenges with the next wave number", async () => {
