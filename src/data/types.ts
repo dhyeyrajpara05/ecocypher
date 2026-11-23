@@ -79,6 +79,8 @@ export interface Challenge {
   releaseAt: string | null;
   /** Meme sound/pop-up overrides for this challenge. Missing keys use the event defaults. */
   cues?: Partial<Record<CueKey, Cue>>;
+  /** In-browser Python workspace shown in the challenge window, with optional starter code. */
+  python?: { enabled: boolean; starter: string };
   createdAt: string;
 }
 

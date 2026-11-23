@@ -667,6 +667,7 @@ var LocalBackend = class {
       hints: rest.hints.filter((h) => h.text.trim()).map((h) => ({ text: h.text.trim(), cost: Math.round(h.cost) || 0 })),
       maxAttempts: Math.round(rest.maxAttempts) || 0,
       cues: cleanCues(rest.cues),
+      python: rest.python?.enabled ? { enabled: true, starter: String(rest.python.starter ?? "").slice(0, 2e4) } : void 0,
       waveId,
       releaseAt,
       flagSalt,

@@ -18,6 +18,7 @@ export interface ChallengeInput {
   typeId: string; theme: ThemeKey; title: string; description: string; points: number;
   flag?: string; caseSensitive: boolean; files: { name: string; url: string }[]; hints: Hint[]; maxAttempts: number; hidden: boolean;
   cues?: Partial<Record<CueKey, Cue>>;
+  python?: { enabled: boolean; starter: string };
 }
 export interface ParsedFile { items: ChallengeInput[]; errors: string[] }
 
@@ -360,7 +361,9 @@ export class LocalBackend implements Backend {
     return { id: existing?.id ?? randomId("c-"), createdAt: existing?.createdAt ?? new Date().toISOString(), ...rest,
       title: rest.title.trim(), files: rest.files.filter((f) => f.name.trim() && f.url.trim()),
       hints: rest.hints.filter((h) => h.text.trim()).map((h) => ({ text: h.text.trim(), cost: Math.round(h.cost) || 0 })),
-      maxAttempts: Math.round(rest.maxAttempts) || 0, cues: cleanCues(rest.cues), waveId, releaseAt, flagSalt, flagHash };
+      maxAttempts: Math.round(rest.maxAttempts) || 0, cues: cleanCues(rest.cues),
+      python: rest.python?.enabled ? { enabled: true, starter: String(rest.python.starter ?? "").slice(0, 20_000) } : undefined,
+      waveId, releaseAt, flagSalt, flagHash };
   }
 
   /** Posts exactly five challenges together as the next wave. */

@@ -25,7 +25,7 @@ function EditModal({ c, onClose }: { c: Challenge | null; onClose: () => void })
   const [error, setError] = useState("");
   if (c && seen !== c.id) {
     setSeen(c.id); setError("");
-    setV({ typeId: c.typeId, theme: c.theme, title: c.title, description: c.description, points: c.points, flag: "", caseSensitive: c.caseSensitive, files: c.files, hints: c.hints, maxAttempts: c.maxAttempts, cues: c.cues, hidden: c.hidden });
+    setV({ typeId: c.typeId, theme: c.theme, title: c.title, description: c.description, points: c.points, flag: "", caseSensitive: c.caseSensitive, files: c.files, hints: c.hints, maxAttempts: c.maxAttempts, cues: c.cues, python: c.python, hidden: c.hidden });
   }
   return (
     <Modal open={!!c} onClose={() => { setSeen(null); onClose(); }} title={`Edit ${c?.title ?? ""}`} wide>

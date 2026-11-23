@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useState } from "react";
 import { AgentNotice } from "../components/AgentNotice";
 import { EasterEggs } from "../components/EasterEggs";
+import { PythonWorkspace } from "../python/PythonWorkspace";
 import { DealPopup, playDeal } from "../components/Deal";
 import { MemePopup, playSound, preloadSound, useMute } from "../components/Faaah";
 import { cueFor, CUE_KEYS } from "../data/sounds";
@@ -119,6 +120,7 @@ function ChallengeModal({ c, onClose }: { c: Challenge | null; onClose: () => vo
               <ul className="flex flex-wrap gap-2">{c.files.map((f) => <li key={f.url}><a className="btn btn-line btn-sm" href={f.url} target="_blank" rel="noreferrer noopener">{f.name}</a></li>)}</ul>
             </div>
           )}
+          {c.python?.enabled && <PythonWorkspace key={c.id} c={c} />}
           {c.hints.length > 0 && (
             <div className="mt-6">
               <p className="label">Hints</p>

@@ -5,7 +5,9 @@ import react from "@vitejs/plugin-react";
 // no connections to other servers. Added at build time only (the dev server needs inline scripts).
 const CSP = [
   "default-src 'self'",
-  "script-src 'self'",
+  // 'wasm-unsafe-eval' lets the in-browser Python (WebAssembly) start; it does not allow eval() of JS.
+  "script-src 'self' 'wasm-unsafe-eval'",
+  "worker-src 'self' blob:",
   "style-src 'self' 'unsafe-inline'",
   "font-src 'self' data:",
   "img-src 'self' data: https:",
@@ -27,6 +29,8 @@ export default defineConfig({
   base: process.env.BASE_PATH ?? "/ecocypher/",
   plugins: [react(), csp()],
   build: { sourcemap: false },
+  // The Python worker loads Pyodide with a dynamic import, which needs ES-module workers.
+  worker: { format: "es" },
   // With `npm run api:dev` running, /api calls go to the local server (dev and preview).
   server: { proxy: { "/api": "http://localhost:8787" } },
   preview: { proxy: { "/api": "http://localhost:8787" } },

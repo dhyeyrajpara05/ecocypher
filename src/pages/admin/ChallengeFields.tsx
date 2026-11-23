@@ -65,6 +65,21 @@ export function ChallengeFields({ value, onChange, idPrefix, editing = false }: 
         ))}
         <button type="button" className="btn btn-line btn-sm" onClick={() => set("files", [...value.files, { name: "", url: "" }])}>Add a file link</button>
       </div>
+      <div className="sm:col-span-6 rounded-xl border border-fin-200 px-4 py-3">
+        <label className="flex items-center gap-2 text-[14px] font-semibold">
+          <input type="checkbox" checked={!!value.python?.enabled} onChange={(e) => set("python", { enabled: e.target.checked, starter: value.python?.starter ?? "" })} />
+          Python workspace in this challenge
+        </label>
+        <p className="mt-1 text-[13px] text-deep/60">Players get a code editor that runs Python in their browser, with this challenge's files ready to open and numpy, pandas and sqlite3 available.</p>
+        {value.python?.enabled && (
+          <>
+            <label className="label mt-3" htmlFor={id("py")}>Starter code (optional)</label>
+            <textarea id={id("py")} className="field h-32 font-mono text-[13px]" spellCheck={false} value={value.python.starter}
+              placeholder={'import sqlite3\ncon = sqlite3.connect("plastic_trail.db")\nprint(con.execute("SELECT name FROM sqlite_master").fetchall())'}
+              onChange={(e) => set("python", { enabled: true, starter: e.target.value })} />
+          </>
+        )}
+      </div>
       <MemeSounds value={value} onChange={onChange} idPrefix={idPrefix} />
     </div>
   );

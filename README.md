@@ -77,6 +77,14 @@ npm run build
    send updates from **Notifications**. If a challenge is too tight, press **+3 attempts** on it in the library;
    every team gets three more guesses straight away.
 
+### Python workspace
+
+Tick **Python workspace in this challenge** in the challenge editor to give players a code editor in the
+challenge window. Python 3 runs in their browser (Pyodide, hosted in `public/pyodide/`), with numpy,
+pandas and the standard library (sqlite3, csv, json…). The challenge's own files (links starting with
+`files/`) are ready to open by name, e.g. `sqlite3.connect("plastic_trail.db")`. Each run has a 30-second
+limit and a Stop button. Code never reaches the server, and flags are still checked only on the server.
+
 ### Hints and attempts
 
 - Each challenge can have any number of hints, each with its own cost. Opening a hint takes that cost off the
