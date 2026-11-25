@@ -7,7 +7,10 @@ export function Footer({ dark = false }: { dark?: boolean }) {
   return (
     <footer className={dark ? "bg-deep text-aqua/80" : "border-t border-fin-200/70 text-fin"}>
       <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-5 py-6 text-[13px] sm:px-8">
-        <p className={`font-display text-[12.5px] font-semibold tracking-wide ${dark ? "text-white" : "text-deep"}`}>Created by DEAKIN RESEARCH &amp; TECHNOLOGY CLUB</p>
+        <div className="space-y-1">
+          <p className={`font-display text-[12.5px] font-semibold tracking-wide ${dark ? "text-white" : "text-deep"}`}>Presented by DEAKIN RESEARCH &amp; TECHNOLOGY CLUB</p>
+          <p className="text-[12px]">Made by <span className={`font-semibold ${dark ? "text-white" : "text-deep"}`}>DHYEY RAJPARA, SHLOKA KAMDAR, AYUSH JAIN, NANDINI ANUMULA</span></p>
+        </div>
         <p>EcoCypher, a sustainability capture-the-flag. Companies and people in the challenges are fictional.</p>
       </div>
     </footer>
