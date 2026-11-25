@@ -32,6 +32,9 @@
   .panel { @apply rounded-2xl border border-fin-200/70 bg-white; }
   .chip { @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[12px] font-semibold; }
   .tabular { font-variant-numeric: tabular-nums; }
+  .lnk { @apply text-kelp-600 underline decoration-kelp/30 underline-offset-4 hover:decoration-kelp; }
+  .code { @apply rounded-md bg-aqua-200 px-1.5 py-0.5 font-mono text-[0.92em] text-deep; }
+  .faq summary::-webkit-details-marker { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -11,6 +11,7 @@ import Play from "./pages/Play";
 import ChangePassword from "./pages/ChangePassword";
 import Admin from "./pages/admin/Admin";
 import Notifications from "./pages/Notifications";
+import Faq from "./pages/Faq";
 
 function Guard({ role, children }: { role: "player" | "admin"; children: React.ReactNode }) {
   const user = useUser();
@@ -29,6 +30,7 @@ function App() {
       <Route path="/password" element={<ChangePassword />} />
       <Route path="/scoreboard" element={<Scoreboard />} />
       <Route path="/notifications" element={<Notifications />} />
+      <Route path="/faq" element={<Faq />} />
       <Route path="/play" element={<Guard role="player"><Play /></Guard>} />
       <Route path="/admin/*" element={<Guard role="admin"><Admin /></Guard>} />
       <Route path="*" element={<Navigate to="/" replace />} />

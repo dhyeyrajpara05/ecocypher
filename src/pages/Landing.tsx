@@ -130,6 +130,7 @@ export default function Landing() {
             <li><b>Use AI to learn, not to solve.</b> Ask it how SQL joins work, not for the answer. Every team must be able to explain how it got each flag.</li>
             <li><b>Keep flags inside your team.</b> Shared answers show up in the organisers' logs.</li>
             <li><b>Guess slowly.</b> Rapid-fire guessing is rate-limited. Read the challenge again instead.</li>
+            <li><Link to="/faq" className="font-semibold text-kelp-600 underline underline-offset-4">Read the full FAQ &amp; guidelines</Link>, with a starter toolkit for every challenge type.</li>
           </ul>
         </section>
       </main>

@@ -47,6 +47,7 @@ export function SiteHeader({ dark = false }: { dark?: boolean }) {
           {unread > 0 && <span className="grid h-5 min-w-5 place-items-center rounded-full bg-coral px-1 text-[11px] font-bold text-white" aria-label={`${unread} unread`}>{unread}</span>}
         </span>
       </NavLink>
+      <NavLink to="/faq" className={link}>FAQ &amp; guidelines</NavLink>
       {user?.role === "admin" && <NavLink to="/admin" className={link}>Admin dashboard</NavLink>}
     </>
   );
