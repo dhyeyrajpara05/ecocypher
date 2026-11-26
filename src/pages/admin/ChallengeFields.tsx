@@ -1,8 +1,9 @@
 import { THEME_INFO, ThemeArt } from "../../components/themes";
-import { THEMES, type ChallengeInput } from "../../data/backend";
+import { isPrivateFile, THEMES, type ChallengeInput } from "../../data/backend";
+import { useRun } from "../../components/ui";
 import { useState } from "react";
 import { CUE_KEYS, CUE_LABELS } from "../../data/sounds";
-import { useDB } from "../../data/store";
+import { useBackend, useDB } from "../../data/store";
 import { CueEditor, usePreview } from "./Soundboard";
 
 export function blankChallenge(typeId: string): ChallengeInput {
@@ -55,15 +56,21 @@ export function ChallengeFields({ value, onChange, idPrefix, editing = false }: 
         {value.hints.length > 0 && <p className="mt-1.5 text-[13px] text-deep/60">Opening a hint takes its cost off the team's score. Set 0 for a free hint.</p>}
       </div>
       <div className="sm:col-span-6">
-        <p className="label">File links (optional)</p>
+        <p className="label">Files (optional)</p>
         {value.files.map((x, i) => (
-          <div key={i} className="mb-2 flex gap-2">
-            <input className="field w-1/3" placeholder="Name" value={x.name} onChange={(e) => set("files", value.files.map((y, j) => j === i ? { ...y, name: e.target.value } : y))} aria-label="File name" />
-            <input className="field" placeholder="https://… or files/name.zip" value={x.url} onChange={(e) => set("files", value.files.map((y, j) => j === i ? { ...y, url: e.target.value } : y))} aria-label="File link" />
+          <div key={i} className="mb-2 flex flex-wrap gap-2 sm:flex-nowrap">
+            <input className="field sm:w-1/3" placeholder="Name" value={x.name} onChange={(e) => set("files", value.files.map((y, j) => j === i ? { ...y, name: e.target.value } : y))} aria-label="File name" />
+            {isPrivateFile(x.url)
+              ? <span className="field flex items-center gap-2 text-[14px] text-deep/70"><span className="chip bg-kelp-100 text-kelp-600">Private upload</span>only teams who can see this challenge can download it</span>
+              : <input className="field" placeholder="https://… or files/name.zip" value={x.url} onChange={(e) => set("files", value.files.map((y, j) => j === i ? { ...y, url: e.target.value } : y))} aria-label="File link" />}
             <button type="button" className="btn btn-line btn-sm" onClick={() => set("files", value.files.filter((_, j) => j !== i))}>Remove</button>
           </div>
         ))}
-        <button type="button" className="btn btn-line btn-sm" onClick={() => set("files", [...value.files, { name: "", url: "" }])}>Add a file link</button>
+        <div className="flex flex-wrap items-center gap-2">
+          <PrivateUpload onAdd={(f) => set("files", [...value.files, f])} />
+          <button type="button" className="btn btn-line btn-sm" onClick={() => set("files", [...value.files, { name: "", url: "" }])}>Add a file link</button>
+        </div>
+        <p className="mt-1.5 text-[13px] text-deep/60">Uploads (up to 3 MB) stay off the public site: they download only for logged-in teams once the challenge is live, and on the testing page. Links to files/… in the repo are public to anyone.</p>
       </div>
       <div className="sm:col-span-6 rounded-xl border border-fin-200 px-4 py-3">
         <label className="flex items-center gap-2 text-[14px] font-semibold">
@@ -109,5 +116,28 @@ function MemeSounds({ value, onChange, idPrefix }: { value: ChallengeInput; onCh
       )}
       {popups}
     </div>
+  );
+}
+
+/** Uploads a handout into the database as a private file and adds it to the challenge. */
+function PrivateUpload({ onAdd }: { onAdd: (f: { name: string; url: string }) => void }) {
+  const be = useBackend();
+  const run = useRun();
+  const [busy, setBusy] = useState(false);
+  return (
+    <label className={`btn btn-kelp btn-sm cursor-pointer ${busy ? "pointer-events-none opacity-60" : ""}`}>
+      {busy ? "Uploading…" : "Upload a private file"}
+      <input type="file" className="sr-only" disabled={busy} onChange={async (e) => {
+        const file = e.target.files?.[0];
+        e.target.value = "";
+        if (!file) return;
+        setBusy(true);
+        await run(async () => {
+          const dataUrl = await new Promise<string>((ok, bad) => { const r = new FileReader(); r.onload = () => ok(String(r.result)); r.onerror = () => bad(new Error("That file couldn't be read.")); r.readAsDataURL(file); });
+          onAdd(await be.uploadFile(file.name, dataUrl));
+        }, `"${file.name}" uploaded. Save the challenge to keep it.`);
+        setBusy(false);
+      }} />
+    </label>
   );
 }

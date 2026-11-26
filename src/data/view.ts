@@ -35,9 +35,12 @@ const publicSolve = (s: Submission): Submission => ({ teamId: s.teamId, userId: 
 export function publicView(db: DB, me: User | null, now = new Date()): DB {
   const v: DB = structuredClone(db);
 
+  // The testing-page password is never sent; the admin only learns whether one is set.
+  delete v.tester;
   if (me?.role === "admin") {
     v.users = v.users.map((u) => omit(u, SECRET_USER));
     v.challenges = v.challenges.map((c) => omit(c, SECRET_CHALLENGE));
+    v.testerEnabled = !!db.tester;
     return v;
   }
 
@@ -64,8 +67,9 @@ export function publicView(db: DB, me: User | null, now = new Date()): DB {
   v.submissions = db.submissions
     .filter((s) => liveIds.has(s.challengeId) && othersVisible(s.teamId, s.at) && (s.correct || (team !== null && s.teamId === team)))
     .map((s) => (team !== null && s.teamId === team ? { ...s } : publicSolve(s)));
+  const archived = new Set(db.challenges.filter((c) => c.archivedAt).map((c) => c.id));
   v.hintUnlocks = db.hintUnlocks
-    .filter((h) => othersVisible(h.teamId, h.at))
+    .filter((h) => !archived.has(h.challengeId) && othersVisible(h.teamId, h.at))
     .map((h) => (team !== null && h.teamId === team ? { ...h } : ({ teamId: h.teamId, challengeId: h.challengeId, index: h.index, cost: h.cost, at: h.at } as typeof h)));
   // Waves are only labels; hide waves that have nothing live yet so their existence doesn't leak.
   const liveWaves = new Set(live.map((c) => c.waveId).filter(Boolean));

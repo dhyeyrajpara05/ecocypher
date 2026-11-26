@@ -3,7 +3,29 @@
   "buildCommand": "npm run build:vercel",
   "outputDirectory": "dist",
   "headers": [
-    { "source": "/api/(state|rpc)", "headers": [{ "key": "Cache-Control", "value": "no-store" }] },
-    { "source": "/pyodide/(.*)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=604800" }] }
+    {
+      "source": "/api/(state|rpc|file)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
+        }
+      ]
+    },
+    {
+      "source": "/pyodide/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=604800"
+        }
+      ]
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/all-challenge-view",
+      "destination": "/index.html"
+    }
   ]
 }

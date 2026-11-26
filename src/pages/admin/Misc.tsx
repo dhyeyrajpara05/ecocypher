@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { Modal, useToast, useRun } from "../../components/ui";
 import type { Credential } from "../../data/backend";
 import { useBackend, useDB, useNow } from "../../data/store";
@@ -164,6 +165,8 @@ export function Settings() {
         <p className="mt-2 text-[13px] text-deep/60">Freezing keeps the last stretch a surprise until the reveal. Admins always see live scores.</p>
       </section>
 
+      <TesterSection />
+
       <section className="panel p-6">
         <h2 className="text-[17px] font-semibold">Data and security</h2>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-[14px] text-deep/75">
@@ -203,5 +206,33 @@ function ClockLength({ minutes }: { minutes: number }) {
         No time limit (runs until you press End now)
       </label>
     </div>
+  );
+}
+
+/** Password for the /all-challenge-view testing page, for testers who aren't the admin. */
+function TesterSection() {
+  const be = useBackend();
+  const db = useDB();
+  const run = useRun();
+  const [pw, setPw] = useState("");
+  const enabled = !!db.testerEnabled;
+  return (
+    <section className="panel p-6">
+      <h2 className="text-[17px] font-semibold">Testing page</h2>
+      <p className="mt-1 text-[14px] text-deep/70">
+        <Link to="/all-challenge-view" className="font-semibold text-kelp underline">/all-challenge-view</Link> lists every challenge (drafts, scheduled and archived too) with full hints,
+        files and a flag checker that records nothing. You can always open it as admin. Set a password so testers can open it without the admin login.
+      </p>
+      <p className="mt-3 text-[14px]">Status: {enabled ? <b className="text-kelp">password set</b> : <b className="text-deep/60">no password (admin only)</b>}</p>
+      <form className="mt-3 flex flex-col gap-2 sm:flex-row" onSubmit={(e) => {
+        e.preventDefault();
+        void run(be.setTesterPassword(pw), "Testing password saved").then((ok) => { if (ok) setPw(""); });
+      }}>
+        <input type="password" className="field" aria-label="Testing password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)}
+          placeholder={enabled ? "New testing password" : "Testing password (6+ characters)"} />
+        <button className="btn btn-kelp shrink-0" disabled={pw.length < 6}>{enabled ? "Change password" : "Set password"}</button>
+        {enabled && <button type="button" className="btn btn-line shrink-0" onClick={() => run(be.setTesterPassword(""), "Testing page is now admin only")}>Turn off</button>}
+      </form>
+    </section>
   );
 }

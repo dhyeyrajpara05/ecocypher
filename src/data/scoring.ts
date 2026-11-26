@@ -2,6 +2,7 @@
 import type { Challenge, DB, ReleaseStatus, ScoreRow, Submission } from "./types";
 
 export function releaseStatus(c: Challenge, now: Date = new Date()): ReleaseStatus {
+  if (c.archivedAt) return "archived";
   if (!c.releaseAt) return "draft";
   return Date.parse(c.releaseAt) > now.getTime() ? "scheduled" : "live";
 }
@@ -63,7 +64,9 @@ export function unlockedHints(db: DB, teamId: string, challengeId: string): Set<
  *  - Teams with no solves rank last, by name.
  */
 export function scoreboard(db: DB, opts: { until?: Date } = {}): ScoreRow[] {
-  const pts = new Map(db.challenges.map((c) => [c.id, c.points]));
+  // Archived challenges are out of play: their solves and hint costs no longer count.
+  const pts = new Map(db.challenges.filter((c) => !c.archivedAt).map((c) => [c.id, c.points]));
+  const archived = new Set(db.challenges.filter((c) => c.archivedAt).map((c) => c.id));
   const userName = new Map(db.users.map((u) => [u.id, u.displayName]));
   const rows = new Map<string, ScoreRow>();
   for (const t of db.teams) {
@@ -75,7 +78,7 @@ export function scoreboard(db: DB, opts: { until?: Date } = {}): ScoreRow[] {
   const cutoff = opts.until ? opts.until.getTime() : Infinity;
   const events = [
     ...solves(db, opts.until).map((s) => ({ kind: "solve" as const, at: s.at, teamId: s.teamId, userId: s.userId, delta: pts.get(s.challengeId) })),
-    ...(db.hintUnlocks ?? []).filter((h) => Date.parse(h.at) <= cutoff && h.cost > 0).map((h) => ({ kind: "hint" as const, at: h.at, teamId: h.teamId, userId: h.userId, delta: -h.cost })),
+    ...(db.hintUnlocks ?? []).filter((h) => Date.parse(h.at) <= cutoff && h.cost > 0 && !archived.has(h.challengeId)).map((h) => ({ kind: "hint" as const, at: h.at, teamId: h.teamId, userId: h.userId, delta: -h.cost })),
   ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
   for (const e of events) {
     const row = rows.get(e.teamId);

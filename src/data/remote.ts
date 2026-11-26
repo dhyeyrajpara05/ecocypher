@@ -4,9 +4,9 @@
  * notifications) reach all players within about 3 seconds. The server only ever sends this browser
  * the data its user may see.
  */
-import { BackendError, parseChallengeText, type Backend, type ChallengeInput, type Credential, type ParsedFile } from "./backend";
+import { BackendError, isPrivateFile, parseChallengeText, triggerDownload, type Backend, type ChallengeInput, type Credential, type ParsedFile } from "./backend";
 import { BUILTIN_SOUNDS } from "./sounds";
-import type { Challenge, ChallengeType, Cue, CueKey, DB, Hint, NoticeLevel, Settings, SoundMeta, SubmitResult, User } from "./types";
+import type { BulkAction, Challenge, ChallengeFile, ChallengeType, Cue, CueKey, DB, Hint, NoticeLevel, Settings, SoundMeta, SubmitResult, TesterChallenge, User } from "./types";
 
 const TOKEN = "ecocypher:token";
 const POLL_MS = 3000;
@@ -107,6 +107,22 @@ export class RemoteBackend implements Backend {
   splitWave(waveId: string) { return this.call<void>("splitWave", waveId); }
   addAttempts(id: string, extra: number) { return this.call<void>("addAttempts", id, extra); }
   deleteChallenge(id: string) { return this.call<void>("deleteChallenge", id); }
+  bulkChallenges(action: BulkAction, ids: string[], at?: string) { return this.call<{ changed: number; skipped: number }>("bulkChallenges", action, ids, at); }
+  uploadFile(name: string, dataUrl: string) { return this.call<ChallengeFile>("uploadFile", name, dataUrl); }
+  async downloadFile(file: ChallengeFile, testerPassword?: string) {
+    if (!isPrivateFile(file.url)) { window.open(file.url, "_blank", "noopener"); return; }
+    let r: Response;
+    try {
+      r = await fetch(this.api(file.url.slice(5)), { headers: { ...this.headers(), ...(testerPassword ? { "X-Tester-Password": testerPassword } : {}) }, cache: "no-store" });
+    } catch { throw new BackendError("Can't reach the server. Check your connection and try again."); }
+    if (!r.ok) throw new BackendError(r.status === 401 ? "Log in again to download this file." : "That file isn't available.");
+    const href = URL.createObjectURL(await r.blob());
+    triggerDownload(href, file.name);
+    setTimeout(() => URL.revokeObjectURL(href), 5000);
+  }
+  testerChallenges(password: string) { return this.call<TesterChallenge[]>("testerChallenges", password); }
+  testerCheckFlag(password: string, challengeId: string, value: string) { return this.call<{ correct: boolean }>("testerCheckFlag", password, challengeId, value); }
+  setTesterPassword(password: string) { return this.call<void>("setTesterPassword", password); }
   parseChallengeFile(text: string): ParsedFile { return parseChallengeText(text, this.state.types); }
 
   createTeam(name: string, members: string[]) { return this.call<Credential[]>("createTeam", name, members); }

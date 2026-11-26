@@ -1,3 +1,4 @@
+import { isPrivateFile } from "../data/backend";
 import { useEffect, useRef, useState } from "react";
 import type { Challenge } from "../data/types";
 import { TIME_LIMIT_S, usePython } from "./usePython";
@@ -15,7 +16,7 @@ export function PythonWorkspace({ c }: { c: Challenge }) {
   const py = usePython();
   const out = useRef<HTMLPreElement>(null);
   const ed = useRef<HTMLTextAreaElement>(null);
-  const files = c.files.filter((f) => !/^https?:/i.test(f.url));
+  const files = c.files.filter((f) => !/^https?:/i.test(f.url) && !isPrivateFile(f.url)); // private uploads need a login, so they aren't mounted
   const busy = py.state !== "idle";
 
   useEffect(() => { try { localStorage.setItem(key(c.id), code); } catch { /* storage full or blocked */ } }, [c.id, code]);

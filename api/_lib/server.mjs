@@ -281,6 +281,7 @@ async function demoDB() {
 
 // src/data/scoring.ts
 function releaseStatus(c, now = /* @__PURE__ */ new Date()) {
+  if (c.archivedAt) return "archived";
   if (!c.releaseAt) return "draft";
   return Date.parse(c.releaseAt) > now.getTime() ? "scheduled" : "live";
 }
@@ -443,6 +444,26 @@ function cleanCues(cues) {
     if (c) out[k] = { sound: String(c.sound), text: String(c.text ?? "").trim().slice(0, 40), seconds: Math.min(30, Math.max(1, Math.round(Number(c.seconds) || 4))) };
   }
   return Object.keys(out).length ? out : void 0;
+}
+var MAX_FILE_BYTES = 3 * 1024 * 1024;
+var FILE_URL = "/api/file?id=";
+var isPrivateFile = (url) => url.startsWith(FILE_URL);
+function fileMetaFor(name, dataUrl) {
+  const m = /^data:([a-z0-9.+/-]*)(;[a-z0-9=;-]+)?;base64,([A-Za-z0-9+/=]+)$/i.exec(dataUrl);
+  if (!m) throw new BackendError("That file couldn't be read. Try again.");
+  const bytes = Math.floor(m[3].length * 3 / 4);
+  if (bytes > MAX_FILE_BYTES) throw new BackendError(`That file is ${(bytes / 1048576).toFixed(1)} MB. The limit is ${MAX_FILE_BYTES / 1048576} MB; zip or trim it, or host it elsewhere and add a link.`);
+  const clean = name.replace(/[\\/\r\n"]/g, "_").trim().slice(0, 100) || "file";
+  return { id: randomId("f").replace(/[^a-z0-9]/gi, "").toLowerCase(), name: clean, mime: m[1] || "application/octet-stream" };
+}
+function triggerDownload(href, name) {
+  const a = document.createElement("a");
+  a.href = href;
+  a.download = name;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 var LocalBackend = class {
   constructor(storage = window.localStorage, cipher = plainCipher) {
@@ -727,9 +748,11 @@ var LocalBackend = class {
   }
   async setRelease(id, releaseAt) {
     this.requireAdmin();
+    const c = this.state.challenges.find((x) => x.id === id);
+    if (c?.archivedAt) throw new BackendError(`"${c.title}" is archived. Restore it first.`);
     this.commit((d) => {
-      const c = d.challenges.find((x) => x.id === id);
-      if (c) c.releaseAt = releaseAt;
+      const c2 = d.challenges.find((x) => x.id === id);
+      if (c2) c2.releaseAt = releaseAt;
     });
   }
   /** Gives every team more wrong guesses on a challenge. Also works if the limit was 0 (it becomes a limit). */
@@ -805,6 +828,127 @@ var LocalBackend = class {
       d.submissions = d.submissions.filter((s) => s.challengeId !== id);
       d.hintUnlocks = d.hintUnlocks.filter((h) => h.challengeId !== id);
       d.waves = d.waves.filter((w) => d.challenges.some((c) => c.waveId === w.id));
+    });
+  }
+  async bulkChallenges(action, ids, at) {
+    this.requireAdmin();
+    const ACTIONS = ["release", "schedule", "unpublish", "archive", "restore", "delete"];
+    if (!ACTIONS.includes(action)) throw new BackendError("Unknown bulk action.");
+    if (!Array.isArray(ids) || !ids.length) throw new BackendError("Select at least one challenge.");
+    if (ids.length > 500) throw new BackendError("Too many challenges at once.");
+    const unique = [...new Set(ids.map(String))];
+    if (unique.some((id) => !this.state.challenges.some((c) => c.id === id))) throw new BackendError("Some of those challenges no longer exist. Refresh and try again.");
+    const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+    let when = nowIso;
+    if (action === "schedule") {
+      const t = Date.parse(String(at ?? ""));
+      if (!Number.isFinite(t)) throw new BackendError("Pick a release time.");
+      if (t <= Date.now()) throw new BackendError("Scheduled time must be in the future.");
+      when = new Date(t).toISOString();
+    }
+    let changed = 0, skipped = 0;
+    this.commit((d) => {
+      for (const id of unique) {
+        const c = d.challenges.find((x) => x.id === id);
+        if (!c) continue;
+        if ((action === "release" || action === "schedule" || action === "unpublish") && c.archivedAt) {
+          skipped++;
+          continue;
+        }
+        if (action === "release" || action === "schedule") c.releaseAt = when;
+        else if (action === "unpublish") c.releaseAt = null;
+        else if (action === "archive") c.archivedAt ??= nowIso;
+        else if (action === "restore") c.archivedAt = null;
+        else {
+          d.challenges = d.challenges.filter((x) => x.id !== id);
+          d.submissions = d.submissions.filter((x) => x.challengeId !== id);
+          d.hintUnlocks = d.hintUnlocks.filter((x) => x.challengeId !== id);
+        }
+        changed++;
+      }
+      if (action === "delete") d.waves = d.waves.filter((w) => d.challenges.some((c) => c.waveId === w.id));
+    });
+    return { changed, skipped };
+  }
+  /** Browser-only version: the file is kept in this browser's storage. The server stores it in the database. */
+  async uploadFile(name, dataUrl) {
+    this.requireAdmin();
+    const meta = fileMetaFor(name, dataUrl);
+    try {
+      this.storage.setItem(`ecocypher:file:${meta.id}`, JSON.stringify({ name: meta.name, dataUrl }));
+    } catch {
+      throw new BackendError("This browser has no room left for that file. Use the Vercel version for large handouts.");
+    }
+    return { name: meta.name, url: FILE_URL + meta.id };
+  }
+  async downloadFile(file, testerPassword) {
+    if (!isPrivateFile(file.url)) {
+      window.open(file.url, "_blank", "noopener");
+      return;
+    }
+    const id = file.url.slice(FILE_URL.length);
+    const me = this.currentUser();
+    const allowed = me?.role === "admin" || testerPassword !== void 0 && await this.testerOk(testerPassword) || !!me && this.state.challenges.some((c) => c.files.some((f2) => f2.url === file.url) && !c.hidden && releaseStatus(c) === "live" && eventStatus(this.state) !== "not-started");
+    if (!allowed) throw new BackendError("That file isn't available.");
+    const raw = this.storage.getItem(`ecocypher:file:${id}`);
+    if (!raw) throw new BackendError("That file isn't available in this browser.");
+    const f = JSON.parse(raw);
+    triggerDownload(f.dataUrl, file.name || f.name);
+  }
+  async testerOk(password) {
+    const t = this.state.tester;
+    return !!t && typeof password === "string" && !!password && sameHash(await hashPassword(password, t.passwordSalt), t.passwordHash);
+  }
+  async requireTester(password) {
+    if (this.currentUser()?.role === "admin") return;
+    if (!await this.testerOk(password)) throw new BackendError("Wrong testing password.");
+  }
+  async testerChallenges(password) {
+    await this.requireTester(password);
+    const d = this.state;
+    const solvedBy = (id) => new Set(d.submissions.filter((s) => s.challengeId === id && s.correct).map((s) => s.teamId)).size;
+    return d.challenges.map((c) => ({
+      id: c.id,
+      title: c.title,
+      typeId: c.typeId,
+      theme: c.theme,
+      points: c.points,
+      status: releaseStatus(c),
+      hidden: c.hidden,
+      description: c.description,
+      hints: c.hints.map((h) => ({ ...h })),
+      files: c.files.map((f) => ({ ...f })),
+      maxAttempts: c.maxAttempts,
+      caseSensitive: c.caseSensitive,
+      waveNumber: d.waves.find((w) => w.id === c.waveId)?.number ?? null,
+      releaseAt: c.releaseAt,
+      solves: solvedBy(c.id)
+    }));
+  }
+  async testerCheckFlag(password, challengeId, value) {
+    await this.requireTester(password);
+    const c = this.state.challenges.find((x) => x.id === challengeId);
+    if (!c) throw new BackendError("That challenge no longer exists.");
+    const v = typeof value === "string" ? value.trim() : "";
+    if (!v) throw new BackendError("Type a flag first.");
+    if (v.length > 500) throw new BackendError("That flag is far too long.");
+    return { correct: sameHash(await hashFlag(v, c.flagSalt, c.caseSensitive), c.flagHash) };
+  }
+  async setTesterPassword(password) {
+    this.requireAdmin();
+    const pw = typeof password === "string" ? password : "";
+    if (!pw) {
+      this.commit((d) => {
+        d.tester = null;
+      });
+      return;
+    }
+    if (pw.length < 6) throw new BackendError("Use at least 6 characters.");
+    if (pw.length > 200) throw new BackendError("That password is too long.");
+    const salt = randomSalt();
+    const hash = await hashPassword(pw, salt);
+    this.commit((d) => {
+      d.tester = { passwordHash: hash, passwordSalt: salt };
     });
   }
   /**
@@ -950,6 +1094,7 @@ var LocalBackend = class {
     d.settings = { ...old.settings, startsAt: null, endsAt: null, freezeAt: null };
     d.types = old.types;
     d.soundboard = old.soundboard;
+    d.tester = old.tester ?? null;
     this.state = d;
     this.persist();
     this.storage.setItem(SESSION, me.id);
@@ -990,9 +1135,11 @@ var stubChallenge = (c) => ({
 var publicSolve = (s) => ({ teamId: s.teamId, userId: s.userId, challengeId: s.challengeId, correct: true, at: s.at });
 function publicView(db, me, now = /* @__PURE__ */ new Date()) {
   const v = structuredClone(db);
+  delete v.tester;
   if (me?.role === "admin") {
     v.users = v.users.map((u) => omit(u, SECRET_USER));
     v.challenges = v.challenges.map((c) => omit(c, SECRET_CHALLENGE));
+    v.testerEnabled = !!db.tester;
     return v;
   }
   const team = me?.teamId ?? null;
@@ -1008,7 +1155,8 @@ function publicView(db, me, now = /* @__PURE__ */ new Date()) {
   }) : live.map(stubChallenge);
   const liveIds = new Set(live.map((c) => c.id));
   v.submissions = db.submissions.filter((s) => liveIds.has(s.challengeId) && othersVisible(s.teamId, s.at) && (s.correct || team !== null && s.teamId === team)).map((s) => team !== null && s.teamId === team ? { ...s } : publicSolve(s));
-  v.hintUnlocks = db.hintUnlocks.filter((h) => othersVisible(h.teamId, h.at)).map((h) => team !== null && h.teamId === team ? { ...h } : { teamId: h.teamId, challengeId: h.challengeId, index: h.index, cost: h.cost, at: h.at });
+  const archived = new Set(db.challenges.filter((c) => c.archivedAt).map((c) => c.id));
+  v.hintUnlocks = db.hintUnlocks.filter((h) => !archived.has(h.challengeId) && othersVisible(h.teamId, h.at)).map((h) => team !== null && h.teamId === team ? { ...h } : { teamId: h.teamId, challengeId: h.challengeId, index: h.index, cost: h.cost, at: h.at });
   const liveWaves = new Set(live.map((c) => c.waveId).filter(Boolean));
   v.waves = db.waves.filter((w) => liveWaves.has(w.id));
   return v;
@@ -1054,7 +1202,12 @@ var METHODS = /* @__PURE__ */ new Set([
   "loadDemo",
   "updateCue",
   "uploadSound",
-  "deleteSound"
+  "deleteSound",
+  "bulkChallenges",
+  "uploadFile",
+  "testerChallenges",
+  "testerCheckFlag",
+  "setTesterPassword"
 ]);
 var ADMIN_ONLY = /* @__PURE__ */ new Set(["loadDemo"]);
 var TOKEN_HOURS = 14;
@@ -1157,6 +1310,30 @@ async function getSound(kv2, id) {
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   return { status: 200, mime: m[1], bytes };
 }
+var fromB64 = (b) => {
+  const bin = atob(b);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+};
+async function testerOk(db, password) {
+  return !!db.tester && !!password && sameHash(await hashPassword(password, db.tester.passwordSalt), db.tester.passwordHash);
+}
+async function getFile(kv2, env, token, id, testerPassword) {
+  const notFound = { status: 404, body: { error: "That file isn't available." } };
+  if (!/^f[a-z0-9]{8,20}$/.test(id)) return notFound;
+  const { db } = await load(kv2, env);
+  const me = await verify(env, db, token);
+  const tester = await testerOk(db, testerPassword);
+  if (!me && !tester) return { status: 401, body: { error: "Log in to download challenge files." } };
+  const url = FILE_URL + id;
+  const allowed = tester || me?.role === "admin" || publicView(db, me).challenges.some((c) => c.files.some((f2) => f2.url === url));
+  if (!allowed) return notFound;
+  const raw = await kv2.getBlob(`file:${id}`);
+  if (!raw) return notFound;
+  const f = JSON.parse(raw);
+  return { status: 200, raw: { mime: f.mime || "application/octet-stream", bytes: fromB64(f.b64), download: f.name } };
+}
 async function rpc(kv2, env, token, method, args) {
   if (!METHODS.has(method) || !Array.isArray(args)) return { status: 400, body: { error: "Unknown action." } };
   if (method === "uploadSound" || method === "deleteSound") {
@@ -1179,6 +1356,21 @@ async function rpc(kv2, env, token, method, args) {
     const r = await rpcCore(kv2, env, token, "deleteSound", args);
     if (r.status === 200) await kv2.delBlob(`sound:${String(args[0])}`);
     return r;
+  }
+  if (method === "uploadFile") {
+    const { db, v } = await load(kv2, env);
+    const me = await verify(env, db, token);
+    if (me?.role !== "admin") return { status: 403, body: { error: "Only admins can do that." } };
+    let meta;
+    try {
+      meta = fileMetaFor(String(args[0] ?? ""), String(args[1] ?? ""));
+    } catch (e) {
+      if (e instanceof BackendError) return { status: 400, body: { error: e.message } };
+      throw e;
+    }
+    const b642 = String(args[1]).slice(String(args[1]).indexOf(",") + 1);
+    await kv2.putBlob(`file:${meta.id}`, JSON.stringify({ name: meta.name, mime: meta.mime, b64: b642 }));
+    return { status: 200, body: { result: { name: meta.name, url: FILE_URL + meta.id }, v, now: Date.now(), me: me.id, view: publicView(db, me) } };
   }
   return rpcCore(kv2, env, token, method, args);
 }
@@ -1233,6 +1425,9 @@ async function handle(kv2, env, req) {
       const s = await getSound(kv2, req.query.get("id") ?? "");
       return s.status === 200 ? { status: 200, raw: { mime: s.mime, bytes: s.bytes } } : { status: 404, body: { error: "Sound not found." } };
     }
+    if (req.path.endsWith("/api/file") && req.method === "GET") {
+      return await getFile(kv2, env, token, req.query.get("id") ?? "", req.tester ?? null);
+    }
     if (req.path.endsWith("/api/rpc") && req.method === "POST") {
       const b = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body ?? {};
       return await rpc(kv2, env, token, String(b.method), b.args ?? []);
@@ -1247,6 +1442,7 @@ function nodeHandler(getKV) {
   return async (req, res) => {
     const url = new URL(req.url ?? "/", "http://x");
     const auth = req.headers.authorization;
+    const tester = req.headers["x-tester-password"];
     let out;
     try {
       out = await handle(getKV(), process.env, {
@@ -1254,7 +1450,8 @@ function nodeHandler(getKV) {
         path: url.pathname,
         query: url.searchParams,
         auth: Array.isArray(auth) ? auth[0] : auth ?? null,
-        body: req.body
+        body: req.body,
+        tester: Array.isArray(tester) ? tester[0] : tester ?? null
       });
     } catch (e) {
       out = { status: 500, body: { error: e.message } };
@@ -1262,7 +1459,11 @@ function nodeHandler(getKV) {
     res.setHeader("X-Content-Type-Options", "nosniff");
     if (out.raw) {
       res.setHeader("Content-Type", out.raw.mime);
-      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      if (out.raw.download !== void 0) {
+        const safe = out.raw.download.replace(/[^\x20-\x7e]|["\\]/g, "_");
+        res.setHeader("Content-Disposition", `attachment; filename="${safe}"; filename*=UTF-8''${encodeURIComponent(out.raw.download)}`);
+        res.setHeader("Cache-Control", "private, no-store");
+      } else res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
       res.status(200).end(Buffer.from(out.raw.bytes));
       return;
     }

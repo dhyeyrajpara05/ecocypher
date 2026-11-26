@@ -10,7 +10,7 @@ import { hashFlag, hashPassword, randomId, randomSalt, sameHash, tempPassword } 
 import { demoDB, emptyDB, makeUser } from "./seed";
 import { attemptsLeft, eventStatus, releaseStatus, solves, unlockedHints, WAVE_SIZE } from "./scoring";
 import { BUILTIN_SOUNDS, CUE_KEYS, defaultSoundboard, MAX_SOUND_BYTES } from "./sounds";
-import type { Challenge, ChallengeType, Cue, CueKey, DB, Hint, NoticeLevel, Settings, SoundMeta, SubmitResult, Team, ThemeKey, User } from "./types";
+import type { BulkAction, Challenge, ChallengeFile, ChallengeType, Cue, CueKey, DB, Hint, NoticeLevel, Settings, SoundMeta, SubmitResult, Team, TesterChallenge, ThemeKey, User } from "./types";
 import { plainCipher, type Cipher } from "./vault";
 
 export interface Credential { team: string; displayName: string; username: string; password: string }
@@ -48,6 +48,18 @@ export interface Backend {
   splitWave(waveId: string): Promise<void>;
   addAttempts(id: string, extra: number): Promise<void>;
   deleteChallenge(id: string): Promise<void>;
+  /** One action on many challenges in a single save. Archived ones are skipped by release, schedule and unpublish. */
+  bulkChallenges(action: BulkAction, ids: string[], at?: string): Promise<{ changed: number; skipped: number }>;
+  /** Stores a private handout. Players can download it only while its challenge is live for them. */
+  uploadFile(name: string, dataUrl: string): Promise<ChallengeFile>;
+  /** Downloads a challenge file (private handouts need the login, or the testing password). */
+  downloadFile(file: ChallengeFile, testerPassword?: string): Promise<void>;
+  /** Testing page (/all-challenge-view): every challenge with full hints. Admin, or the testing password. */
+  testerChallenges(password: string): Promise<TesterChallenge[]>;
+  /** Checks a flag on the testing page without recording anything. */
+  testerCheckFlag(password: string, challengeId: string, value: string): Promise<{ correct: boolean }>;
+  /** Sets the testing-page password. "" = Admin only. */
+  setTesterPassword(password: string): Promise<void>;
   parseChallengeFile(text: string): ParsedFile;
   // admin: people
   createTeam(name: string, members: string[]): Promise<Credential[]>;
@@ -184,6 +196,25 @@ function cleanCues(cues: ChallengeInput["cues"]): Challenge["cues"] {
   const out: NonNullable<Challenge["cues"]> = {};
   for (const k of CUE_KEYS) { const c = cues[k]; if (c) out[k] = { sound: String(c.sound), text: String(c.text ?? "").trim().slice(0, 40), seconds: Math.min(30, Math.max(1, Math.round(Number(c.seconds) || 4))) }; }
   return Object.keys(out).length ? out : undefined;
+}
+
+/** Private handouts: stored apart from the event data, served by /api/file to people allowed to see them. */
+export const MAX_FILE_BYTES = 3 * 1024 * 1024;
+export const FILE_URL = "/api/file?id=";
+export const isPrivateFile = (url: string) => url.startsWith(FILE_URL);
+export function fileMetaFor(name: string, dataUrl: string): { id: string; name: string; mime: string } {
+  const m = /^data:([a-z0-9.+/-]*)(;[a-z0-9=;-]+)?;base64,([A-Za-z0-9+/=]+)$/i.exec(dataUrl);
+  if (!m) throw new BackendError("That file couldn't be read. Try again.");
+  const bytes = Math.floor((m[3].length * 3) / 4);
+  if (bytes > MAX_FILE_BYTES) throw new BackendError(`That file is ${(bytes / 1048576).toFixed(1)} MB. The limit is ${MAX_FILE_BYTES / 1048576} MB; zip or trim it, or host it elsewhere and add a link.`);
+  const clean = name.replace(/[\\/\r\n"]/g, "_").trim().slice(0, 100) || "file";
+  return { id: randomId("f").replace(/[^a-z0-9]/gi, "").toLowerCase(), name: clean, mime: m[1] || "application/octet-stream" };
+}
+
+export function triggerDownload(href: string, name: string) {
+  const a = document.createElement("a");
+  a.href = href; a.download = name; a.rel = "noopener";
+  document.body.appendChild(a); a.click(); a.remove();
 }
 
 export class LocalBackend implements Backend {
@@ -417,6 +448,8 @@ export class LocalBackend implements Backend {
   }
   async setRelease(id: string, releaseAt: string | null) {
     this.requireAdmin();
+    const c = this.state.challenges.find((x) => x.id === id);
+    if (c?.archivedAt) throw new BackendError(`"${c.title}" is archived. Restore it first.`);
     this.commit((d) => { const c = d.challenges.find((x) => x.id === id); if (c) c.releaseAt = releaseAt; });
   }
   /** Gives every team more wrong guesses on a challenge. Also works if the limit was 0 (it becomes a limit). */
@@ -475,6 +508,104 @@ export class LocalBackend implements Backend {
       d.hintUnlocks = d.hintUnlocks.filter((h) => h.challengeId !== id);
       d.waves = d.waves.filter((w) => d.challenges.some((c) => c.waveId === w.id));
     });
+  }
+
+  async bulkChallenges(action: BulkAction, ids: string[], at?: string) {
+    this.requireAdmin();
+    const ACTIONS: BulkAction[] = ["release", "schedule", "unpublish", "archive", "restore", "delete"];
+    if (!ACTIONS.includes(action)) throw new BackendError("Unknown bulk action.");
+    if (!Array.isArray(ids) || !ids.length) throw new BackendError("Select at least one challenge.");
+    if (ids.length > 500) throw new BackendError("Too many challenges at once.");
+    const unique = [...new Set(ids.map(String))];
+    if (unique.some((id) => !this.state.challenges.some((c) => c.id === id))) throw new BackendError("Some of those challenges no longer exist. Refresh and try again.");
+    const nowIso = new Date().toISOString();
+    let when = nowIso;
+    if (action === "schedule") {
+      const t = Date.parse(String(at ?? ""));
+      if (!Number.isFinite(t)) throw new BackendError("Pick a release time.");
+      if (t <= Date.now()) throw new BackendError("Scheduled time must be in the future.");
+      when = new Date(t).toISOString();
+    }
+    let changed = 0, skipped = 0;
+    this.commit((d) => {
+      for (const id of unique) {
+        const c = d.challenges.find((x) => x.id === id);
+        if (!c) continue;
+        if ((action === "release" || action === "schedule" || action === "unpublish") && c.archivedAt) { skipped++; continue; }
+        if (action === "release" || action === "schedule") c.releaseAt = when;
+        else if (action === "unpublish") c.releaseAt = null;
+        else if (action === "archive") c.archivedAt ??= nowIso;
+        else if (action === "restore") c.archivedAt = null;
+        else {
+          d.challenges = d.challenges.filter((x) => x.id !== id);
+          d.submissions = d.submissions.filter((x) => x.challengeId !== id);
+          d.hintUnlocks = d.hintUnlocks.filter((x) => x.challengeId !== id);
+        }
+        changed++;
+      }
+      if (action === "delete") d.waves = d.waves.filter((w) => d.challenges.some((c) => c.waveId === w.id));
+    });
+    return { changed, skipped };
+  }
+
+  /** Browser-only version: the file is kept in this browser's storage. The server stores it in the database. */
+  async uploadFile(name: string, dataUrl: string): Promise<ChallengeFile> {
+    this.requireAdmin();
+    const meta = fileMetaFor(name, dataUrl);
+    try { this.storage.setItem(`ecocypher:file:${meta.id}`, JSON.stringify({ name: meta.name, dataUrl })); }
+    catch { throw new BackendError("This browser has no room left for that file. Use the Vercel version for large handouts."); }
+    return { name: meta.name, url: FILE_URL + meta.id };
+  }
+  async downloadFile(file: ChallengeFile, testerPassword?: string) {
+    if (!isPrivateFile(file.url)) { window.open(file.url, "_blank", "noopener"); return; }
+    const id = file.url.slice(FILE_URL.length);
+    const me = this.currentUser();
+    const allowed = me?.role === "admin" || (testerPassword !== undefined && await this.testerOk(testerPassword))
+      || (!!me && this.state.challenges.some((c) => c.files.some((f) => f.url === file.url) && !c.hidden && releaseStatus(c) === "live" && eventStatus(this.state) !== "not-started"));
+    if (!allowed) throw new BackendError("That file isn't available.");
+    const raw = this.storage.getItem(`ecocypher:file:${id}`);
+    if (!raw) throw new BackendError("That file isn't available in this browser.");
+    const f = JSON.parse(raw) as { name: string; dataUrl: string };
+    triggerDownload(f.dataUrl, file.name || f.name);
+  }
+
+  private async testerOk(password: string) {
+    const t = this.state.tester;
+    return !!t && typeof password === "string" && !!password && sameHash(await hashPassword(password, t.passwordSalt), t.passwordHash);
+  }
+  private async requireTester(password: string) {
+    if (this.currentUser()?.role === "admin") return;
+    if (!(await this.testerOk(password))) throw new BackendError("Wrong testing password.");
+  }
+  async testerChallenges(password: string): Promise<TesterChallenge[]> {
+    await this.requireTester(password);
+    const d = this.state;
+    const solvedBy = (id: string) => new Set(d.submissions.filter((s) => s.challengeId === id && s.correct).map((s) => s.teamId)).size;
+    return d.challenges.map((c) => ({
+      id: c.id, title: c.title, typeId: c.typeId, theme: c.theme, points: c.points, status: releaseStatus(c), hidden: c.hidden,
+      description: c.description, hints: c.hints.map((h) => ({ ...h })), files: c.files.map((f) => ({ ...f })),
+      maxAttempts: c.maxAttempts, caseSensitive: c.caseSensitive, waveNumber: d.waves.find((w) => w.id === c.waveId)?.number ?? null,
+      releaseAt: c.releaseAt, solves: solvedBy(c.id),
+    }));
+  }
+  async testerCheckFlag(password: string, challengeId: string, value: string) {
+    await this.requireTester(password);
+    const c = this.state.challenges.find((x) => x.id === challengeId);
+    if (!c) throw new BackendError("That challenge no longer exists.");
+    const v = typeof value === "string" ? value.trim() : "";
+    if (!v) throw new BackendError("Type a flag first.");
+    if (v.length > 500) throw new BackendError("That flag is far too long.");
+    return { correct: sameHash(await hashFlag(v, c.flagSalt, c.caseSensitive), c.flagHash) };
+  }
+  async setTesterPassword(password: string) {
+    this.requireAdmin();
+    const pw = typeof password === "string" ? password : "";
+    if (!pw) { this.commit((d) => { d.tester = null; }); return; }
+    if (pw.length < 6) throw new BackendError("Use at least 6 characters.");
+    if (pw.length > 200) throw new BackendError("That password is too long.");
+    const salt = randomSalt();
+    const hash = await hashPassword(pw, salt);
+    this.commit((d) => { d.tester = { passwordHash: hash, passwordSalt: salt }; });
   }
 
   /**
@@ -595,6 +726,7 @@ export class LocalBackend implements Backend {
     d.settings = { ...old.settings, startsAt: null, endsAt: null, freezeAt: null };
     d.types = old.types;
     d.soundboard = old.soundboard;
+    d.tester = old.tester ?? null;
     this.state = d; this.persist();
     this.storage.setItem(SESSION, me.id);
     this.emit();

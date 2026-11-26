@@ -12,6 +12,7 @@ import ChangePassword from "./pages/ChangePassword";
 import Admin from "./pages/admin/Admin";
 import Notifications from "./pages/Notifications";
 import Faq from "./pages/Faq";
+import AllChallengeView from "./pages/AllChallengeView";
 
 function Guard({ role, children }: { role: "player" | "admin"; children: React.ReactNode }) {
   const user = useUser();
@@ -31,11 +32,17 @@ function App() {
       <Route path="/scoreboard" element={<Scoreboard />} />
       <Route path="/notifications" element={<Notifications />} />
       <Route path="/faq" element={<Faq />} />
+      <Route path="/all-challenge-view" element={<AllChallengeView />} />
       <Route path="/play" element={<Guard role="player"><Play /></Guard>} />
       <Route path="/admin/*" element={<Guard role="admin"><Admin /></Guard>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
+}
+
+// The testing page is shared as a plain path (…/all-challenge-view); the app routes by hash, so move it there.
+if (/\/all-challenge-view\/?$/.test(location.pathname) && !location.hash) {
+  history.replaceState(null, "", location.pathname.replace(/all-challenge-view\/?$/, "") + "#/all-challenge-view");
 }
 
 ReactDOM.createRoot(document.getElementById("root")!).render(

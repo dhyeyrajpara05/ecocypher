@@ -81,6 +81,8 @@ export interface Challenge {
   cues?: Partial<Record<CueKey, Cue>>;
   /** In-browser Python workspace shown in the challenge window, with optional starter code. */
   python?: { enabled: boolean; starter: string };
+  /** Set when an admin archives the challenge: out of play and off the scoreboard, but kept. */
+  archivedAt?: string | null;
   createdAt: string;
 }
 
@@ -141,9 +143,13 @@ export interface DB {
   hintUnlocks: HintUnlock[];
   notifications: Notification[];
   demo: boolean;
+  /** Password for the /all-challenge-view testing page (hash only). null/absent = Admin only. */
+  tester?: { passwordHash: string; passwordSalt: string } | null;
+  /** Sent to the admin instead of `tester`: whether a testing password is set. */
+  testerEnabled?: boolean;
 }
 
-export type ReleaseStatus = "draft" | "scheduled" | "live";
+export type ReleaseStatus = "draft" | "scheduled" | "live" | "archived";
 
 export interface MemberScore {
   userId: string;
@@ -173,3 +179,24 @@ export interface SubmitResult {
   points?: number;
   message: string;
 }
+
+/** One challenge as shown on the testing page: everything except the flag. */
+export interface TesterChallenge {
+  id: string;
+  title: string;
+  typeId: string;
+  theme: ThemeKey;
+  points: number;
+  status: ReleaseStatus;
+  hidden: boolean;
+  description: string;
+  hints: Hint[];
+  files: ChallengeFile[];
+  maxAttempts: number;
+  caseSensitive: boolean;
+  waveNumber: number | null;
+  releaseAt: string | null;
+  solves: number;
+}
+
+export type BulkAction = "release" | "schedule" | "unpublish" | "archive" | "restore" | "delete";

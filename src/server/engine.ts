@@ -3,14 +3,15 @@
  * server, against one shared database, so every player and the admin see the same event.
  * Flags are checked here; players only ever receive a filtered view (see data/view.ts).
  */
-import { BackendError, KEY, LocalBackend, migrate, SESSION, soundMetaFor } from "../data/backend";
+import { hashPassword, sameHash } from "../data/crypto";
+import { BackendError, FILE_URL, fileMetaFor, KEY, LocalBackend, migrate, SESSION, soundMetaFor } from "../data/backend";
 import { demoDB, freshDB } from "../data/seed";
 import type { DB, User } from "../data/types";
 import { publicView, viewChangeTimes } from "../data/view";
 import type { KV } from "./kv";
 
 export interface Env { SESSION_SECRET?: string; ADMIN_PASSWORD?: string; SEED?: string }
-export interface Reply { status: number; body?: unknown; raw?: { mime: string; bytes: Uint8Array } }
+export interface Reply { status: number; body?: unknown; raw?: { mime: string; bytes: Uint8Array; download?: string } }
 
 /** Everything the browser may call. Anything else is refused. */
 const METHODS = new Set([
@@ -20,6 +21,7 @@ const METHODS = new Set([
   "createTeam", "importTeams", "renameTeam", "deleteTeam", "addMember", "resetPassword", "deleteUser",
   "postNotification", "deleteNotification", "exportJSON", "importJSON", "startFresh", "loadDemo",
   "updateCue", "uploadSound", "deleteSound",
+  "bulkChallenges", "uploadFile", "testerChallenges", "testerCheckFlag", "setTesterPassword",
 ]);
 const ADMIN_ONLY = new Set(["loadDemo"]);
 const TOKEN_HOURS = 14;
@@ -121,6 +123,33 @@ export async function getSound(kv: KV, id: string): Promise<{ status: number; mi
   return { status: 200, mime: m[1], bytes };
 }
 
+const fromB64 = (b: string) => { const bin = atob(b); const out = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; };
+
+async function testerOk(db: DB, password: string | null) {
+  return !!db.tester && !!password && sameHash(await hashPassword(password, db.tester.passwordSalt), db.tester.passwordHash);
+}
+
+/**
+ * GET /api/file?id=… with the player's Bearer token (or the testing password in X-Tester-Password).
+ * A private handout is only served to the admin, a tester, or a logged-in player who can currently see
+ * a challenge that links to it, so handouts never leak before release and never sit in the public repo.
+ */
+export async function getFile(kv: KV, env: Env, token: string | null, id: string, testerPassword: string | null): Promise<Reply> {
+  const notFound: Reply = { status: 404, body: { error: "That file isn't available." } };
+  if (!/^f[a-z0-9]{8,20}$/.test(id)) return notFound;
+  const { db } = await load(kv, env);
+  const me = await verify(env, db, token);
+  const tester = await testerOk(db, testerPassword);
+  if (!me && !tester) return { status: 401, body: { error: "Log in to download challenge files." } };
+  const url = FILE_URL + id;
+  const allowed = tester || me?.role === "admin" || publicView(db, me).challenges.some((c) => c.files.some((f) => f.url === url));
+  if (!allowed) return notFound;
+  const raw = await kv.getBlob(`file:${id}`);
+  if (!raw) return notFound;
+  const f = JSON.parse(raw) as { name: string; mime: string; b64: string };
+  return { status: 200, raw: { mime: f.mime || "application/octet-stream", bytes: fromB64(f.b64), download: f.name } };
+}
+
 /** POST /api/rpc { method, args }. Runs one action as the logged-in person. */
 export async function rpc(kv: KV, env: Env, token: string | null, method: string, args: unknown[]): Promise<Reply> {
   if (!METHODS.has(method) || !Array.isArray(args)) return { status: 400, body: { error: "Unknown action." } };
@@ -141,6 +170,18 @@ export async function rpc(kv: KV, env: Env, token: string | null, method: string
     const r = await rpcCore(kv, env, token, "deleteSound", args);
     if (r.status === 200) await kv.delBlob(`sound:${String(args[0])}`);
     return r;
+  }
+  // Private handouts: the file goes into its own database entry; the challenge only keeps its link.
+  if (method === "uploadFile") {
+    const { db, v } = await load(kv, env);
+    const me = await verify(env, db, token);
+    if (me?.role !== "admin") return { status: 403, body: { error: "Only admins can do that." } };
+    let meta;
+    try { meta = fileMetaFor(String(args[0] ?? ""), String(args[1] ?? "")); }
+    catch (e) { if (e instanceof BackendError) return { status: 400, body: { error: e.message } }; throw e; }
+    const b64 = String(args[1]).slice(String(args[1]).indexOf(",") + 1);
+    await kv.putBlob(`file:${meta.id}`, JSON.stringify({ name: meta.name, mime: meta.mime, b64 }));
+    return { status: 200, body: { result: { name: meta.name, url: FILE_URL + meta.id }, v, now: Date.now(), me: me.id, view: publicView(db, me) } };
   }
   return rpcCore(kv, env, token, method, args);
 }

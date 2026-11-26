@@ -10,7 +10,7 @@ import type { CueKey } from "../data/types";
 import { BigTimer, Footer, useEventClock } from "../components/chrome";
 import { SiteHeader } from "../components/SiteHeader";
 import { THEME_INFO, ThemeArt } from "../components/themes";
-import { CountUp, Empty, Modal, TypeChip, useToast } from "../components/ui";
+import { CountUp, Empty, Modal, TypeChip, useToast, useRun } from "../components/ui";
 import { attemptsLeft, eventStatus, scoreboard, solveCounts, solves, unlockedHints, visibleChallenges, wrongAttempts } from "../data/scoring";
 import { useBackend, useDB, useNow, useUser } from "../data/store";
 import type { Challenge } from "../data/types";
@@ -36,6 +36,7 @@ function ChallengeModal({ c, onClose }: { c: Challenge | null; onClose: () => vo
   const db = useDB();
   const user = useUser()!;
   const toast = useToast();
+  const run = useRun();
   const clockState = useEventClock();
   const [flag, setFlag] = useState("");
   const [msg, setMsg] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
@@ -117,7 +118,7 @@ function ChallengeModal({ c, onClose }: { c: Challenge | null; onClose: () => vo
           {c.files.length > 0 && (
             <div className="mt-5">
               <p className="label">Files</p>
-              <ul className="flex flex-wrap gap-2">{c.files.map((f) => <li key={f.url}><a className="btn btn-line btn-sm" href={f.url} target="_blank" rel="noreferrer noopener">{f.name}</a></li>)}</ul>
+              <ul className="flex flex-wrap gap-2">{c.files.map((f) => <li key={f.url}><button type="button" className="btn btn-line btn-sm" onClick={() => run(be.downloadFile(f))}>{f.name}</button></li>)}</ul>
             </div>
           )}
           {c.python?.enabled && <PythonWorkspace key={c.id} c={c} />}
