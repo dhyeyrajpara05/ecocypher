@@ -158,17 +158,15 @@ export interface FinalRow {
   teamId: string;
   teamName: string;
   members: string[];
-  /** CTF points (after hint costs) and the same scaled so the top CTF team = 100. */
+  /** CTF points (after hint costs), exactly as on the scoreboard. */
   ctfScore: number;
-  ctfScaled: number;
-  /** Average of the judges' pitch scores (out of pitchMax), or null if no judge scored the team. */
+  /** Average of the judges' pitch scores, or null if no judge scored the team. */
   pitchAvg: number | null;
-  pitchScaled: number;
-  /** Weighted total out of 100. */
+  /** CTF points + judges' average. Highest wins. */
   combined: number;
 }
 export interface Finals {
-  /** Share of the final score that comes from the CTF, 0–100. The rest comes from the pitch. */
+  /** Unused since the final score became CTF points + judges' average. Kept so older saved data still reads. */
   ctfWeight: number;
   /** Highest score a judge can give a pitch. */
   pitchMax: number;

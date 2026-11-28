@@ -18,7 +18,7 @@ const adminTok = async () => {
 const player = async () => ((await call(null, "loginMember", "t4", "t4-u1", DEMO_PLAYER_PASSWORD)).body as unknown as { token: string }).token;
 
 describe("final results", () => {
-  it("combines scaled CTF and judges' average with the chosen weights", async () => {
+  it("adds the judges' average to the team's CTF points; highest total wins", async () => {
     const a = await adminTok();
     const v0 = await view(a);
     const [t1, t2] = v0.teams;
@@ -26,11 +26,15 @@ describe("final results", () => {
       scores: { [t1.id]: { "j-aaaa1": 8, "j-bbbb2": 6 }, [t2.id]: { "j-aaaa1": 10 } } });
     const v = await view(a);
     const rows = finalStandings(v);
-    const ctf = scoreboard(v), top = Math.max(...ctf.map((r) => r.score));
+    const ctf = scoreboard(v);
     const r1 = rows.find((r) => r.teamId === t1.id)!, s1 = ctf.find((r) => r.teamId === t1.id)!;
     expect(r1.pitchAvg).toBe(7);
-    expect(r1.combined).toBeCloseTo(.4 * (s1.score / top * 100) + .6 * 70, 0);
-    expect(rows.find((r) => r.teamId === t2.id)!.pitchScaled).toBe(100);
+    expect(r1.ctfScore).toBe(s1.score);
+    expect(r1.combined).toBe(s1.score + 7);
+    const r2 = rows.find((r) => r.teamId === t2.id)!;
+    expect(r2.combined).toBe(ctf.find((r) => r.teamId === t2.id)!.score + 10);
+    expect(rows.every((r, i) => i === 0 || rows[i - 1].combined >= r.combined)).toBe(true);
+    const t3 = v.teams[2]; expect(rows.find((r) => r.teamId === t3.id)!.combined).toBe(ctf.find((r) => r.teamId === t3.id)!.score);
     expect(rows.map((r) => r.rank)).toEqual([...rows.map((r) => r.rank)].sort((x, y) => x - y));
     expect((await call(a, "updateFinals", { scores: { [t1.id]: { "j-aaaa1": 11 } } })).body.error).toMatch(/between 0 and 10/);
     expect((await call(a, "updateFinals", { ctfWeight: 120 })).body.error).toMatch(/0 and 100/);

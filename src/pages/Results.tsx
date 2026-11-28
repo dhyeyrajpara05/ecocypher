@@ -99,9 +99,9 @@ function PodiumSpot({ row, place, shown, run }: { row?: FinalRow; place: 1 | 2 |
             <p className="text-[12px] font-semibold uppercase tracking-[0.18em]" style={{ color: p.ring }}>{p.word}</p>
             <p className={`mt-1 break-words font-display font-bold leading-tight text-white ${place === 1 ? "text-[16px] sm:text-[30px]" : "text-[13.5px] sm:text-[22px]"}`}>{row.teamName}</p>
             <p className={`whitespace-nowrap font-display font-bold ${place === 1 ? "text-[28px] sm:text-[52px]" : "text-[21px] sm:text-[38px]"}`} style={{ color: p.ring }}>
-              <Count value={row.combined} run={run} /><span className="ml-1 text-[11px] font-medium text-aqua/70 sm:text-[15px]">/100</span>
+              <Count value={row.combined} decimals={row.combined % 1 ? 1 : 0} run={run} /><span className="ml-1 text-[11px] font-medium text-aqua/70 sm:text-[15px]">pts</span>
             </p>
-            <p className="text-[11px] leading-snug text-aqua/75 sm:text-[13px]"><span className="whitespace-nowrap">CTF {row.ctfScore.toLocaleString("en-IN")}</span> · <span className="whitespace-nowrap">Pitch {row.pitchAvg ?? "–"}</span></p>
+            <p className="text-[11px] leading-snug text-aqua/75 sm:text-[13px]"><span className="whitespace-nowrap">CTF {row.ctfScore.toLocaleString("en-IN")}</span> + <span className="whitespace-nowrap">Judges {row.pitchAvg ?? 0}</span></p>
             {row.members.length > 0 && <p className="mt-1 hidden truncate text-[12px] text-aqua/55 sm:block">{row.members.join(", ")}</p>}
           </motion.div>
         )}
@@ -125,7 +125,8 @@ export default function Results() {
   const f = db.finals ?? defaultFinals();
   const preview = isAdmin && !f.published;
   const rows: FinalRow[] | null = useMemo(() => (f.published && f.snapshot ? f.snapshot : isAdmin ? finalStandings(db) : null), [db, f, isAdmin]);
-  const w = f.ctfWeight;
+  const top = Math.max(1, ...(rows ?? []).map((r) => Math.max(0, r.ctfScore) + (r.pitchAvg ?? 0)));
+  const fmt = (n: number) => n.toLocaleString("en-IN", { maximumFractionDigits: 1 });
 
   // The reveal: 0 = drumroll, 1 = 3rd, 2 = 2nd, 3 = 1st (+ confetti), 4 = everyone. Plays once per published result per browser.
   const key = `ecocypher:results-seen:${f.publishedAt ?? "preview"}`;
@@ -178,7 +179,7 @@ export default function Results() {
         <section className="relative mx-auto max-w-5xl px-5 pb-2 pt-8 text-center sm:px-8">
           <p className="text-[13px] font-semibold uppercase tracking-[0.22em] text-brass">{db.settings.eventName} · Final results</p>
           <h1 className="mt-2 font-display text-[32px] font-bold leading-tight sm:text-[48px]">The sharks have decided</h1>
-          <p className="mx-auto mt-2 max-w-xl text-[14.5px] text-aqua/80">CTF flags plus the Shark Tank pitch, combined out of 100.</p>
+          <p className="mx-auto mt-2 max-w-xl text-[14.5px] text-aqua/80">CTF points plus the judges' Shark Tank score. The highest total wins.</p>
           <div className="mt-4 flex flex-wrap justify-center gap-2">
             <button className="btn btn-ghost-light btn-sm" onClick={play}>Replay the reveal</button>
             <button className="btn btn-ghost-light btn-sm" onClick={toggleMute} aria-pressed={muted}>{muted ? "Sound off" : "Sound on"}</button>
@@ -209,34 +210,34 @@ export default function Results() {
           <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
             <h2 className="font-display text-[22px] font-bold">Every team</h2>
             <p className="flex items-center gap-4 text-[12.5px] text-aqua/80">
-              <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-4 rounded-full bg-kelp-300" />CTF ({w}%)</span>
-              <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-4 rounded-full bg-brass" />Pitch ({100 - w}%)</span>
+              <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-4 rounded-full bg-kelp-300" />CTF points</span>
+              <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-4 rounded-full bg-brass" />Judges' average</span>
             </p>
           </div>
           <ol className="space-y-2">
             {rows.map((r, i) => {
-              const ctfPart = r.ctfScaled * w / 100, pitchPart = r.pitchScaled * (100 - w) / 100;
+              const ctfPart = Math.max(0, r.ctfScore) / top * 100, pitchPart = (r.pitchAvg ?? 0) / top * 100;
               return (
                 <motion.li key={r.teamId} className={`grid grid-cols-[2.5rem_1fr_auto] items-center gap-3 rounded-2xl px-4 py-3 ${i < 3 ? "bg-white/10 ring-1 ring-brass/40" : "bg-white/5"}`}
                   initial={false} animate={{ opacity: stage >= 4 ? 1 : 0, x: stage >= 4 ? 0 : -20 }} transition={{ delay: stage >= 4 && run ? i * .05 : 0 }}>
                   <span className={`grid h-9 w-9 place-items-center rounded-full font-display text-[15px] font-bold ${i < 3 ? "bg-brass text-deep" : "bg-white/10 text-aqua"}`}>{r.rank}</span>
                   <span className="min-w-0">
                     <span className="block truncate font-semibold">{r.teamName}</span>
-                    <span className="mt-1.5 flex h-2.5 w-full overflow-hidden rounded-full bg-white/10" role="img" aria-label={`CTF ${ctfPart.toFixed(1)} plus pitch ${pitchPart.toFixed(1)}`}>
+                    <span className="mt-1.5 flex h-2.5 w-full overflow-hidden rounded-full bg-white/10" role="img" aria-label={`CTF ${r.ctfScore} points plus judges ${r.pitchAvg ?? 0}`}>
                       <motion.span className="h-full bg-kelp-300" initial={false} animate={{ width: stage >= 4 ? `${ctfPart}%` : "0%" }} transition={{ duration: .8, delay: run ? .2 + i * .05 : 0 }} />
                       <motion.span className="h-full bg-brass" initial={false} animate={{ width: stage >= 4 ? `${pitchPart}%` : "0%" }} transition={{ duration: .8, delay: run ? .45 + i * .05 : 0 }} />
                     </span>
-                    <span className="mt-1 block text-[12px] text-aqua/65">CTF {r.ctfScore.toLocaleString("en-IN")} pts · Pitch {r.pitchAvg === null ? "not scored" : `${r.pitchAvg} / ${f.pitchMax}`}</span>
+                    <span className="mt-1 block text-[12px] text-aqua/65">CTF {fmt(r.ctfScore)} pts + judges {r.pitchAvg === null ? "not scored" : `${fmt(r.pitchAvg)} / ${f.pitchMax}`}</span>
                   </span>
-                  <span className="text-right font-display text-[22px] font-bold text-white">{r.combined.toFixed(1)}</span>
+                  <span className="text-right font-display text-[22px] font-bold text-white">{fmt(r.combined)}</span>
                 </motion.li>
               );
             })}
           </ol>
           {rest.length === 0 && rows.length < 4 && <p className="mt-3 text-[13px] text-aqua/60">That's every team.</p>}
           <p className="mt-6 text-[12.5px] leading-relaxed text-aqua/65">
-            How it's scored: CTF points are scaled so the top CTF team gets 100, and the pitch score is the average of the judges, scaled to 100.
-            The final score is {w}% CTF and {100 - w}% pitch. Ties go to the team with more CTF points.
+            How it's scored: each team's CTF points (after hint costs) plus the average of the judges' Shark Tank scores. The highest total wins;
+            a tie goes to the team with more CTF points.
             {f.publishedAt && <> Published {dateTime(f.publishedAt)}.</>}
           </p>
         </motion.section>

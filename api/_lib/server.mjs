@@ -367,23 +367,18 @@ function defaultFinals() {
 var round1 = (n) => Math.round(n * 10) / 10;
 function finalStandings(db, f = db.finals ?? defaultFinals()) {
   const ctf = scoreboard(db);
-  const top = Math.max(0, ...ctf.map((r) => r.score));
-  const w = Math.min(100, Math.max(0, f.ctfWeight)) / 100;
   const rows = ctf.map((r) => {
     const given = f.judges.map((j) => f.scores[r.teamId]?.[j.id]).filter((v) => typeof v === "number" && Number.isFinite(v));
     const pitchAvg = given.length ? given.reduce((a, b) => a + b, 0) / given.length : null;
-    const ctfScaled = top > 0 ? Math.max(0, r.score) / top * 100 : 0;
-    const pitchScaled = pitchAvg === null || f.pitchMax <= 0 ? 0 : Math.min(100, pitchAvg / f.pitchMax * 100);
+    const avg = pitchAvg === null ? null : round1(pitchAvg);
     return {
       rank: 0,
       teamId: r.teamId,
       teamName: r.teamName,
       members: r.members.map((m) => m.name),
       ctfScore: r.score,
-      ctfScaled: round1(ctfScaled),
-      pitchAvg: pitchAvg === null ? null : round1(pitchAvg),
-      pitchScaled: round1(pitchScaled),
-      combined: round1(w * ctfScaled + (1 - w) * pitchScaled)
+      pitchAvg: avg,
+      combined: round1(r.score + (avg ?? 0))
     };
   });
   rows.sort((a, b) => b.combined - a.combined || b.ctfScore - a.ctfScore || (b.pitchAvg ?? -1) - (a.pitchAvg ?? -1) || a.teamName.localeCompare(b.teamName));

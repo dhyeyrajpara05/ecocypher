@@ -22,7 +22,6 @@ export default function Finals() {
   const db = useDB();
   const run = useRun();
   const f = db.finals ?? defaultFinals();
-  const [weight, setWeight] = useState(f.ctfWeight);
   const [max, setMax] = useState(String(f.pitchMax));
   const [judges, setJudges] = useState<Judge[]>(f.judges);
   const [draft, setDraft] = useState<Draft>(() => toDraft(f.scores));
@@ -30,29 +29,29 @@ export default function Finals() {
   // Pick up changes saved elsewhere (another admin tab), unless there are unsaved edits here.
   const savedKey = JSON.stringify([f.ctfWeight, f.pitchMax, f.judges, f.scores]);
   const [lastSaved, setLastSaved] = useState(savedKey);
-  const dirtySettings = weight !== f.ctfWeight || Number(max) !== f.pitchMax;
+  const dirtySettings = Number(max) !== f.pitchMax;
   const dirtyJudges = JSON.stringify(judges) !== JSON.stringify(f.judges);
   const dirtyScores = JSON.stringify(fromDraft(draft)) !== JSON.stringify(f.scores);
   useEffect(() => {
     if (savedKey === lastSaved) return;
     setLastSaved(savedKey);
-    if (!dirtySettings) { setWeight(f.ctfWeight); setMax(String(f.pitchMax)); }
+    if (!dirtySettings) setMax(String(f.pitchMax));
     if (!dirtyJudges) setJudges(f.judges);
     if (!dirtyScores) setDraft(toDraft(f.scores));
   }, [savedKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const live = useMemo(() => finalStandings(db, { ...f, ctfWeight: weight, pitchMax: Number(max) || f.pitchMax, judges, scores: fromDraft(draft) }), [db, f, weight, max, judges, draft]);
+  const live = useMemo(() => finalStandings(db, { ...f, pitchMax: Number(max) || f.pitchMax, judges, scores: fromDraft(draft) }), [db, f, max, judges, draft]);
   const published = f.published && f.snapshot;
   const outOfDate = !!published && JSON.stringify(f.snapshot!.map((r) => [r.teamId, r.combined, r.rank])) !== JSON.stringify(finalStandings(db).map((r) => [r.teamId, r.combined, r.rank]));
   const missing = db.teams.filter((t) => judges.some((j) => !(draft[t.id]?.[j.id] ?? "").trim()));
   const setScore = (teamId: string, judgeId: string, v: string) => setDraft((d) => ({ ...d, [teamId]: { ...(d[teamId] ?? {}), [judgeId]: v } }));
-  const saveAll = () => run(be.updateFinals({ ctfWeight: weight, pitchMax: Number(max), judges, scores: fromDraft(draft) }), "Final results saved");
+  const saveAll = () => run(be.updateFinals({ pitchMax: Number(max), judges, scores: fromDraft(draft) }), "Final results saved");
   const anyDirty = dirtySettings || dirtyJudges || dirtyScores;
 
   return (
     <div>
       <PageHead title="Final results" actions={<Link className="btn btn-line" to="/results">{published ? "Open the results page" : "Preview the results page"}</Link>}>
-        Enter the judges' Shark Tank scores, choose how much the CTF and the pitch count, then publish. Players see nothing until you publish.
+        Enter the judges' Shark Tank scores, then publish. Each team's final score is its CTF points plus the judges' average; the highest total wins. Players see nothing until you publish.
       </PageHead>
 
       {/* publish status */}
@@ -78,14 +77,9 @@ export default function Finals() {
         {/* weighting + judges */}
         <section className="panel space-y-5 p-5">
           <div>
-            <h2 className="text-[17px] font-semibold">Weighting</h2>
-            <label className="mt-3 block text-[14px]" htmlFor="fw">CTF <b>{weight}%</b> · Shark Tank pitch <b>{100 - weight}%</b></label>
-            <input id="fw" type="range" min={0} max={100} step={5} value={weight} onChange={(e) => setWeight(Number(e.target.value))} className="mt-2 w-full accent-[#1F7A5C]" />
-            <p className="mt-1 text-[12.5px] text-deep/60">CTF points are scaled so the top CTF team gets 100; the pitch is the judges' average scaled to 100.</p>
-          </div>
-          <div>
             <label className="label" htmlFor="fmax">Each judge scores a pitch out of</label>
             <input id="fmax" type="number" min={1} max={1000} className="field w-32" value={max} onChange={(e) => setMax(e.target.value)} />
+            <p className="mt-1 text-[12.5px] text-deep/60">The judges' average is added straight onto the team's CTF points, so pick a scale that fits: out of 10 adds at most 10 points.</p>
           </div>
           <div>
             <h2 className="text-[17px] font-semibold">Judges</h2>
@@ -149,8 +143,8 @@ export default function Finals() {
         <div className="mt-3 overflow-x-auto">
           <table className="w-full text-[14px]">
             <thead><tr className="text-left text-[12.5px] text-deep/60">
-              <th className="py-1.5 pr-3">#</th><th className="py-1.5 pr-3">Team</th><th className="py-1.5 pr-3 text-right">CTF points</th><th className="py-1.5 pr-3 text-right">CTF /100</th>
-              <th className="py-1.5 pr-3 text-right">Pitch avg</th><th className="py-1.5 pr-3 text-right">Pitch /100</th><th className="py-1.5 text-right">Final /100</th>
+              <th className="py-1.5 pr-3">#</th><th className="py-1.5 pr-3">Team</th><th className="py-1.5 pr-3 text-right">CTF points</th>
+              <th className="py-1.5 pr-3 text-right">Judges' average</th><th className="py-1.5 text-right">Final score</th>
             </tr></thead>
             <tbody>
               {live.map((r) => (
@@ -158,10 +152,8 @@ export default function Finals() {
                   <td className="py-1.5 pr-3">{r.rank <= 3 ? ["🥇", "🥈", "🥉"][r.rank - 1] : r.rank}</td>
                   <td className="max-w-[12rem] truncate py-1.5 pr-3">{r.teamName}</td>
                   <td className="py-1.5 pr-3 text-right tabular">{r.ctfScore.toLocaleString("en-IN")}</td>
-                  <td className="py-1.5 pr-3 text-right tabular">{r.ctfScaled.toFixed(1)}</td>
                   <td className="py-1.5 pr-3 text-right tabular">{r.pitchAvg ?? "–"}</td>
-                  <td className="py-1.5 pr-3 text-right tabular">{r.pitchScaled.toFixed(1)}</td>
-                  <td className="py-1.5 text-right tabular text-kelp">{r.combined.toFixed(1)}</td>
+                  <td className="py-1.5 text-right tabular text-kelp">{r.combined.toLocaleString("en-IN", { maximumFractionDigits: 1 })}</td>
                 </tr>
               ))}
             </tbody>
@@ -172,7 +164,7 @@ export default function Finals() {
       <Modal open={confirm} onClose={() => setConfirm(false)} title="Publish the final results?">
         <p className="text-[14.5px]">Everyone will see the Results page with the standings as they are now, and teams get a notification. You can unpublish, or update it if scores change.</p>
         <ol className="mt-3 space-y-1 text-[14px]">
-          {live.slice(0, 3).map((r) => <li key={r.teamId}><b>{["1st", "2nd", "3rd"][r.rank - 1] ?? `${r.rank}th`}</b>: {r.teamName} ({r.combined.toFixed(1)})</li>)}
+          {live.slice(0, 3).map((r) => <li key={r.teamId}><b>{["1st", "2nd", "3rd"][r.rank - 1] ?? `${r.rank}th`}</b>: {r.teamName} ({r.combined.toLocaleString("en-IN", { maximumFractionDigits: 1 })} points)</li>)}
         </ol>
         <div className="mt-5 flex justify-end gap-2">
           <button className="btn btn-line" onClick={() => setConfirm(false)}>Not yet</button>

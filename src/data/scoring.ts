@@ -126,25 +126,20 @@ export function defaultFinals(): Finals {
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
 /**
- * Final standings = CTF + Shark Tank pitch.
- *  - CTF: the team's points scaled so the top CTF team gets 100 (0 if nobody scored).
- *  - Pitch: the average of the judges who scored the team, scaled to 100 (pitchMax = 100).
- *  - Combined = ctfWeight% of the CTF part + the rest of the pitch part, out of 100.
+ * Final standings = CTF points + the judges' average pitch score.
+ *  - CTF: the team's points exactly as on the scoreboard (after hint costs).
+ *  - Pitch: the average of the judges who scored the team (0 if none did).
  *  - Ties: higher combined, then higher CTF points, then higher pitch, then team name.
  */
 export function finalStandings(db: DB, f: Finals = db.finals ?? defaultFinals()): FinalRow[] {
   const ctf = scoreboard(db);
-  const top = Math.max(0, ...ctf.map((r) => r.score));
-  const w = Math.min(100, Math.max(0, f.ctfWeight)) / 100;
   const rows = ctf.map((r) => {
     const given = f.judges.map((j) => f.scores[r.teamId]?.[j.id]).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
     const pitchAvg = given.length ? given.reduce((a, b) => a + b, 0) / given.length : null;
-    const ctfScaled = top > 0 ? Math.max(0, r.score) / top * 100 : 0;
-    const pitchScaled = pitchAvg === null || f.pitchMax <= 0 ? 0 : Math.min(100, pitchAvg / f.pitchMax * 100);
+    const avg = pitchAvg === null ? null : round1(pitchAvg);
     return {
       rank: 0, teamId: r.teamId, teamName: r.teamName, members: r.members.map((m) => m.name),
-      ctfScore: r.score, ctfScaled: round1(ctfScaled), pitchAvg: pitchAvg === null ? null : round1(pitchAvg), pitchScaled: round1(pitchScaled),
-      combined: round1(w * ctfScaled + (1 - w) * pitchScaled),
+      ctfScore: r.score, pitchAvg: avg, combined: round1(r.score + (avg ?? 0)),
     };
   });
   rows.sort((a, b) => b.combined - a.combined || b.ctfScore - a.ctfScore || (b.pitchAvg ?? -1) - (a.pitchAvg ?? -1) || a.teamName.localeCompare(b.teamName));
