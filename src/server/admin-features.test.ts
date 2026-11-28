@@ -12,7 +12,10 @@ beforeEach(() => { kv = new MemoryKV(); });
 type Body = { v: number; view: DB; token?: string; result?: unknown; error?: string };
 const call = async (token: string | null, method: string, ...args: unknown[]) => (await rpc(kv, env, token, method, args)) as { status: number; body: Body };
 const view = async (token: string | null) => ((await getState(kv, env, token, 0, 0)) as { body: Body }).body.view;
-const admin = async () => (await call(null, "login", DEMO_ADMIN.username, DEMO_ADMIN.password)).body.token!;
+const admin = async () => {
+  const t = (await call(null, "login", DEMO_ADMIN.username, DEMO_ADMIN.password)).body.token!;
+  return (await call(t, "changePassword", DEMO_ADMIN.password, "a-new-admin-password")).body.token!;
+};
 const player = async () => (await call(null, "loginMember", "t4", "t4-u1", DEMO_PLAYER_PASSWORD)).body.token!;
 const blank = { typeId: "", theme: "plastics", description: "Find it", points: 50, caseSensitive: false, files: [], hints: [{ text: "Look closely", cost: 5 }], maxAttempts: 0, hidden: false };
 
@@ -58,23 +61,23 @@ describe("testing page", () => {
     const typeId = (await view(a)).types[0].id;
     const made = (await call(a, "saveChallenge", null, { ...blank, typeId, title: "Draft one", flag: "ECO{test-flag}" }, null)).body.result as Challenge;
     expect((await call(null, "testerChallenges", "")).body.error).toMatch(/testing password/);
-    expect((await call(a, "setTesterPassword", "abc")).body.error).toMatch(/6 characters/);
-    const set = await call(a, "setTesterPassword", "tester-pass");
+    expect((await call(a, "setTesterPassword", "abc")).body.error).toMatch(/12 characters/);
+    const set = await call(a, "setTesterPassword", "tester-pass-long");
     expect(set.body.view.testerEnabled).toBe(true);
     expect(JSON.stringify(set.body.view)).not.toContain('"tester"');
     expect(JSON.stringify(await view(null))).not.toContain("tester");
     expect((await call(null, "testerChallenges", "wrong-pass")).body.error).toMatch(/testing password/);
-    const list = (await call(null, "testerChallenges", "tester-pass")).body.result as TesterChallenge[];
+    const list = (await call(null, "testerChallenges", "tester-pass-long")).body.result as TesterChallenge[];
     const mine = list.find((c) => c.id === made.id)!;
     expect(mine.status).toBe("draft");
     expect(mine.hints[0].text).toBe("Look closely");
     expect(JSON.stringify(list)).not.toMatch(/flagHash|flagSalt/);
     const subs = (await view(a)).submissions.length;
-    expect((await call(null, "testerCheckFlag", "tester-pass", made.id, "eco{test-flag}")).body.result).toEqual({ correct: true });
-    expect((await call(null, "testerCheckFlag", "tester-pass", made.id, "ECO{nope}")).body.result).toEqual({ correct: false });
+    expect((await call(null, "testerCheckFlag", "tester-pass-long", made.id, "eco{test-flag}")).body.result).toEqual({ correct: true });
+    expect((await call(null, "testerCheckFlag", "tester-pass-long", made.id, "ECO{nope}")).body.result).toEqual({ correct: false });
     expect((await view(a)).submissions.length).toBe(subs);
     await call(a, "setTesterPassword", "");
-    expect((await call(null, "testerChallenges", "tester-pass")).body.error).toMatch(/testing password/);
+    expect((await call(null, "testerChallenges", "tester-pass-long")).body.error).toMatch(/testing password/);
   }, 60_000);
 });
 
@@ -95,8 +98,8 @@ describe("private challenge files", () => {
     expect(got.status).toBe(200);
     expect(got.raw?.download).toBe("answers.zip");
     expect(new TextDecoder().decode(got.raw!.bytes)).toBe("PK\u0003\u0004\n");
-    await call(a, "setTesterPassword", "tester-pass");
-    expect((await getFile(kv, env, null, id, "tester-pass")).status).toBe(200);
+    await call(a, "setTesterPassword", "tester-pass-long");
+    expect((await getFile(kv, env, null, id, "tester-pass-long")).status).toBe(200);
     await call(a, "startTimer");
     await call(a, "bulkChallenges", "release", [c.id]);
     expect((await getFile(kv, env, p, id, null)).status).toBe(200);                    // live: allowed

@@ -116,7 +116,7 @@ export default function Faq() {
         { q: "Are flags case-sensitive? What about spaces?", tags: "case sensitive uppercase lowercase spaces", a: <>Spaces before and after the flag are ignored. Most flags are not case-sensitive. If a challenge needs exact capitals, its description tells you.</> },
         { q: "I'm sure my flag is right but it's rejected.", tags: "wrong rejected correct not accepted", a: <>Check the format (prefix and braces), typos such as 0 vs O or l vs 1, extra characters inside the braces, and whether the challenge asks for a specific format (for example a date as YYYY-MM-DD or a number with no commas). Then re-read the question: most "right but rejected" flags answer a slightly different question.</> },
         { q: "How many attempts do we get?", tags: "attempts limit guesses out of attempts", a: <>Each challenge shows its limit. Attempts are shared by the whole team, so a teammate's wrong guess uses one of yours. When they run out, the flag box closes for your team. Organisers can add attempts for everyone if a challenge turns out too tight.</> },
-        { q: "It says \"Too many attempts. Wait a minute.\"", tags: "rate limit too many wait minute", a: <>Each member can submit {s.submissionsPerMinute} flags per minute. Wait a minute and try again. Guessing fast rarely helps; re-reading the challenge usually does.</> },
+        { q: "It says \"Too many attempts. Wait a minute.\"", tags: "rate limit too many wait minute", a: <>Your team can submit {s.submissionsPerMinute} flags per minute on each challenge. Wait a minute and try again. Guessing fast rarely helps; re-reading the challenge usually does.</> },
         { q: "What's the loud \"FAAAAAA\" pop-up?", tags: "sound popup meme mute wrong", a: <>That's a wrong flag. You can turn the sound off with the sound switch in the challenge window.</> },
       ],
     },
@@ -189,7 +189,7 @@ export default function Faq() {
               ["Clock", clock ? <>{clock}. Challenges, hints and the flag box open when the organisers start the clock and close when it hits zero.</> : <>No fixed limit this time. Challenges, hints and flags open at the start; the organisers end the event.</>],
               ["Teams", <>Up to {s.teamSize} members, each with their own login. Every point goes to the team.</>],
               ["Scoring", <>Each challenge scores its points once per team. Paid hints take points off. On equal points, the team that got there first ranks higher.</>],
-              ["Attempts", <>Shared across your team. Some challenges have a limit; it's shown on the card. Each member can submit up to {s.submissionsPerMinute} flags a minute.</>],
+              ["Attempts", <>Shared across your team. Some challenges have a limit; it's shown on the card. Your team can submit up to {s.submissionsPerMinute} flags a minute on each challenge.</>],
               ["Fair play", <>Use AI to learn, not to solve. Keep flags inside your team. The website itself is not a target.</>],
             ].map(([t, d]) => (
               <div key={String(t)} className="rounded-2xl bg-aqua-200/70 p-5">

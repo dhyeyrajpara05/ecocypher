@@ -24,12 +24,12 @@ export function randomSalt(): string {
   return hex(a.buffer);
 }
 
-/** Readable temporary password, e.g. "kelp-reef-4821". */
+/** Readable temporary password, e.g. "kelp-reef-gull-moss-4821" (4 words from 14 + 4 digits, about 345 million combinations). */
 export function tempPassword(): string {
   const words = ["kelp", "reef", "tide", "fin", "coral", "drift", "shoal", "brine", "gull", "dune", "moss", "fern", "pearl", "wave"];
-  const a = new Uint32Array(3);
+  const a = new Uint32Array(5);
   crypto.getRandomValues(a);
-  return `${words[a[0] % words.length]}-${words[a[1] % words.length]}-${1000 + (a[2] % 9000)}`;
+  return `${words[a[0] % words.length]}-${words[a[1] % words.length]}-${words[a[2] % words.length]}-${words[a[3] % words.length]}-${1000 + (a[4] % 9000)}`;
 }
 
 async function pbkdf2(secret: string, salt: string, iterations: number): Promise<string> {
