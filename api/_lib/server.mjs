@@ -17,9 +17,9 @@ function randomSalt() {
 }
 function tempPassword() {
   const words = ["kelp", "reef", "tide", "fin", "coral", "drift", "shoal", "brine", "gull", "dune", "moss", "fern", "pearl", "wave"];
-  const a = new Uint32Array(3);
+  const a = new Uint32Array(5);
   crypto.getRandomValues(a);
-  return `${words[a[0] % words.length]}-${words[a[1] % words.length]}-${1e3 + a[2] % 9e3}`;
+  return `${words[a[0] % words.length]}-${words[a[1] % words.length]}-${words[a[2] % words.length]}-${words[a[3] % words.length]}-${1e3 + a[4] % 9e3}`;
 }
 async function pbkdf2(secret, salt, iterations) {
   const key = await crypto.subtle.importKey("raw", enc.encode(secret), "PBKDF2", false, ["deriveBits"]);
@@ -598,11 +598,11 @@ var LocalBackend = class {
     if (!value.trim()) return { ok: false, correct: false, message: "Type a flag first." };
     if (attemptsLeft(d, u.teamId, c) <= 0) return { ok: false, correct: false, message: "Your team has used all its attempts on this challenge. Ask an organiser if you think that's unfair." };
     const since = Date.now() - 6e4;
-    if (d.submissions.filter((s) => s.userId === u.id && Date.parse(s.at) > since).length >= d.settings.submissionsPerMinute) {
+    if (d.submissions.filter((s) => s.teamId === u.teamId && s.challengeId === c.id && Date.parse(s.at) > since).length >= d.settings.submissionsPerMinute) {
       return { ok: false, correct: false, message: "Too many attempts. Wait a minute and try again." };
     }
     const correct = sameHash(await hashFlag(value, c.flagSalt, c.caseSensitive), c.flagHash);
-    this.commit((x) => x.submissions.push({ id: randomId("s-"), userId: u.id, teamId: u.teamId, challengeId: c.id, value: correct ? "(correct flag)" : value.trim().slice(0, 200), correct, at: (/* @__PURE__ */ new Date()).toISOString() }));
+    this.commit((x) => x.submissions.push({ id: randomId("s-"), userId: u.id, teamId: u.teamId, challengeId: c.id, value: correct ? "(correct flag)" : value.trim().slice(0, 100), correct, at: (/* @__PURE__ */ new Date()).toISOString() }));
     return correct ? { ok: true, correct: true, points: c.points, message: `Deal! The sharks invested ${c.points} points in your team.` } : { ok: true, correct: false, message: "Not quite. That flag isn't right." };
   }
   /** Opens a hint for the whole team. Its cost comes off the team's score straight away. */
@@ -943,7 +943,7 @@ var LocalBackend = class {
       });
       return;
     }
-    if (pw.length < 6) throw new BackendError("Use at least 6 characters.");
+    if (pw.length < 12) throw new BackendError("Use at least 12 characters for the testing password.");
     if (pw.length > 200) throw new BackendError("That password is too long.");
     const salt = randomSalt();
     const hash = await hashPassword(pw, salt);
@@ -1210,7 +1210,30 @@ var METHODS = /* @__PURE__ */ new Set([
   "setTesterPassword"
 ]);
 var ADMIN_ONLY = /* @__PURE__ */ new Set(["loadDemo"]);
-var TOKEN_HOURS = 14;
+var TOKEN_HOURS = 8;
+var LOCK_MS = 5 * 6e4;
+var ACCOUNT_MAX_MISSES = 5;
+var TESTER_MAX_MISSES = 10;
+var MUST_CHANGE_ALLOWED = /* @__PURE__ */ new Set(["changePassword", "login", "loginMember"]);
+var lockKey = (s) => `lock:${s.toLowerCase().replace(/[^a-z0-9._@-]/g, "_").slice(0, 80)}`;
+async function lockedMinutes(kv2, key) {
+  const raw = await kv2.getBlob(key);
+  if (!raw) return 0;
+  const { until = 0 } = JSON.parse(raw);
+  return until > Date.now() ? Math.ceil((until - Date.now()) / 6e4) : 0;
+}
+async function recordMiss(kv2, key, max) {
+  const raw = await kv2.getBlob(key);
+  let { n = 0, until = 0 } = raw ? JSON.parse(raw) : {};
+  if (until && until <= Date.now()) {
+    n = 0;
+    until = 0;
+  }
+  n += 1;
+  if (n >= max) until = Date.now() + LOCK_MS;
+  await kv2.putBlob(key, JSON.stringify({ n, until }));
+}
+var lockedReply = (mins) => ({ status: 429, body: { error: `Too many wrong passwords. Try again in ${mins} minute${mins === 1 ? "" : "s"}.` } });
 var MemStorage = class {
   m = /* @__PURE__ */ new Map();
   get length() {
@@ -1324,7 +1347,14 @@ async function getFile(kv2, env, token, id, testerPassword) {
   if (!/^f[a-z0-9]{8,20}$/.test(id)) return notFound;
   const { db } = await load(kv2, env);
   const me = await verify(env, db, token);
-  const tester = await testerOk(db, testerPassword);
+  let tester = false;
+  if (!me && testerPassword) {
+    const mins = await lockedMinutes(kv2, lockKey("tester"));
+    if (mins > 0) return lockedReply(mins);
+    tester = await testerOk(db, testerPassword);
+    if (tester) await kv2.delBlob(lockKey("tester"));
+    else await recordMiss(kv2, lockKey("tester"), TESTER_MAX_MISSES);
+  }
   if (!me && !tester) return { status: 401, body: { error: "Log in to download challenge files." } };
   const url = FILE_URL + id;
   const allowed = tester || me?.role === "admin" || publicView(db, me).challenges.some((c) => c.files.some((f2) => f2.url === url));
@@ -1336,10 +1366,33 @@ async function getFile(kv2, env, token, id, testerPassword) {
 }
 async function rpc(kv2, env, token, method, args) {
   if (!METHODS.has(method) || !Array.isArray(args)) return { status: 400, body: { error: "Unknown action." } };
+  if (method === "login" || method === "loginMember") {
+    const key = lockKey(method === "login" ? `login:${String(args[0] ?? "").trim()}` : `member:${String(args[1] ?? "")}`);
+    const mins = await lockedMinutes(kv2, key);
+    if (mins > 0) return lockedReply(mins);
+    const r = await rpcCore(kv2, env, token, method, args);
+    if (r.status === 400) await recordMiss(kv2, key, ACCOUNT_MAX_MISSES);
+    else if (r.status === 200) await kv2.delBlob(key);
+    return r;
+  }
+  if (method === "testerChallenges" || method === "testerCheckFlag") {
+    const { db } = await load(kv2, env);
+    const me = await verify(env, db, token);
+    if (me?.role !== "admin") {
+      const key = lockKey("tester");
+      const mins = await lockedMinutes(kv2, key);
+      if (mins > 0) return lockedReply(mins);
+      const r = await rpcCore(kv2, env, token, method, args);
+      if (r.status === 400 && r.body.error === "Wrong testing password.") await recordMiss(kv2, key, TESTER_MAX_MISSES);
+      else if (r.status === 200) await kv2.delBlob(key);
+      return r;
+    }
+  }
   if (method === "uploadSound" || method === "deleteSound") {
     const { db } = await load(kv2, env);
     const me = await verify(env, db, token);
     if (me?.role !== "admin") return { status: 403, body: { error: "Only admins can do that." } };
+    if (me.mustChangePassword) return { status: 403, body: { error: "Change your temporary password first." } };
     if (method === "uploadSound") {
       let meta;
       try {
@@ -1361,6 +1414,7 @@ async function rpc(kv2, env, token, method, args) {
     const { db, v } = await load(kv2, env);
     const me = await verify(env, db, token);
     if (me?.role !== "admin") return { status: 403, body: { error: "Only admins can do that." } };
+    if (me.mustChangePassword) return { status: 403, body: { error: "Change your temporary password first." } };
     let meta;
     try {
       meta = fileMetaFor(String(args[0] ?? ""), String(args[1] ?? ""));
@@ -1375,10 +1429,11 @@ async function rpc(kv2, env, token, method, args) {
   return rpcCore(kv2, env, token, method, args);
 }
 async function rpcCore(kv2, env, token, method, args) {
-  for (let attempt = 0; attempt < 6; attempt++) {
+  for (let attempt = 0; attempt < 10; attempt++) {
     const { db, raw, v } = await load(kv2, env);
     const me = await verify(env, db, token);
     if (ADMIN_ONLY.has(method) && me?.role !== "admin") return { status: 403, body: { error: "Only admins can do that." } };
+    if (me?.mustChangePassword && !MUST_CHANGE_ALLOWED.has(method)) return { status: 403, body: { error: "Change your temporary password first." } };
     const mem = new MemStorage();
     mem.setItem(KEY, raw);
     if (me) mem.setItem(SESSION, me.id);
@@ -1435,7 +1490,7 @@ async function handle(kv2, env, req) {
     return { status: 404, body: { error: "Not found." } };
   } catch (e) {
     console.error(e);
-    return { status: 500, body: { error: e.message || "Server error." } };
+    return { status: 500, body: { error: "Server error. Try again in a moment." } };
   }
 }
 function nodeHandler(getKV) {
@@ -1454,7 +1509,8 @@ function nodeHandler(getKV) {
         tester: Array.isArray(tester) ? tester[0] : tester ?? null
       });
     } catch (e) {
-      out = { status: 500, body: { error: e.message } };
+      console.error(e);
+      out = { status: 500, body: { error: "Server error. Try again in a moment." } };
     }
     res.setHeader("X-Content-Type-Options", "nosniff");
     if (out.raw) {

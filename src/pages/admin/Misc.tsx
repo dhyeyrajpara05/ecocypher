@@ -127,7 +127,7 @@ export function Settings() {
         <ClockLength minutes={s.durationMinutes} />
         <div className="sm:col-span-2"><label className="label" htmlFor="tl">Homepage headline</label><input id="tl" name="tagline" className="field" defaultValue={s.tagline} /></div>
         <div><label className="label" htmlFor="size">Members per team</label><input id="size" name="size" type="number" min={1} max={8} className="field" defaultValue={s.teamSize} /></div>
-        <div><label className="label" htmlFor="spm">Flag attempts per member per minute</label><input id="spm" name="spm" type="number" min={1} className="field" defaultValue={s.submissionsPerMinute} /></div>
+        <div><label className="label" htmlFor="spm">Flag attempts per team per challenge per minute</label><input id="spm" name="spm" type="number" min={1} className="field" defaultValue={s.submissionsPerMinute} /></div>
         <button className="btn btn-kelp justify-self-start">Save settings</button>
         <p className="text-[13px] text-deep/60 sm:col-span-2">Start, extend and end the clock from the dashboard.</p>
       </form>

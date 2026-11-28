@@ -24,7 +24,30 @@ const METHODS = new Set([
   "bulkChallenges", "uploadFile", "testerChallenges", "testerCheckFlag", "setTesterPassword",
 ]);
 const ADMIN_ONLY = new Set(["loadDemo"]);
-const TOKEN_HOURS = 14;
+const TOKEN_HOURS = 8;
+/** Wrong-password limits. Counters live in their own database entries so a guess never rewrites the event data. */
+const LOCK_MS = 5 * 60_000;
+const ACCOUNT_MAX_MISSES = 5;
+const TESTER_MAX_MISSES = 10;
+const MUST_CHANGE_ALLOWED = new Set(["changePassword", "login", "loginMember"]);
+const lockKey = (s: string) => `lock:${s.toLowerCase().replace(/[^a-z0-9._@-]/g, "_").slice(0, 80)}`;
+
+/** Minutes left on a lock (0 = not locked). */
+async function lockedMinutes(kv: KV, key: string): Promise<number> {
+  const raw = await kv.getBlob(key);
+  if (!raw) return 0;
+  const { until = 0 } = JSON.parse(raw) as { n: number; until?: number };
+  return until > Date.now() ? Math.ceil((until - Date.now()) / 60_000) : 0;
+}
+async function recordMiss(kv: KV, key: string, max: number) {
+  const raw = await kv.getBlob(key);
+  let { n = 0, until = 0 } = raw ? (JSON.parse(raw) as { n: number; until?: number }) : {};
+  if (until && until <= Date.now()) { n = 0; until = 0; } // an old lock has expired: start counting again
+  n += 1;
+  if (n >= max) until = Date.now() + LOCK_MS;
+  await kv.putBlob(key, JSON.stringify({ n, until }));
+}
+const lockedReply = (mins: number): Reply => ({ status: 429, body: { error: `Too many wrong passwords. Try again in ${mins} minute${mins === 1 ? "" : "s"}.` } });
 
 class MemStorage implements Storage {
   m = new Map<string, string>();
@@ -139,7 +162,13 @@ export async function getFile(kv: KV, env: Env, token: string | null, id: string
   if (!/^f[a-z0-9]{8,20}$/.test(id)) return notFound;
   const { db } = await load(kv, env);
   const me = await verify(env, db, token);
-  const tester = await testerOk(db, testerPassword);
+  let tester = false;
+  if (!me && testerPassword) {
+    const mins = await lockedMinutes(kv, lockKey("tester"));
+    if (mins > 0) return lockedReply(mins);
+    tester = await testerOk(db, testerPassword);
+    if (tester) await kv.delBlob(lockKey("tester")); else await recordMiss(kv, lockKey("tester"), TESTER_MAX_MISSES);
+  }
   if (!me && !tester) return { status: 401, body: { error: "Log in to download challenge files." } };
   const url = FILE_URL + id;
   const allowed = tester || me?.role === "admin" || publicView(db, me).challenges.some((c) => c.files.some((f) => f.url === url));
@@ -153,11 +182,36 @@ export async function getFile(kv: KV, env: Env, token: string | null, id: string
 /** POST /api/rpc { method, args }. Runs one action as the logged-in person. */
 export async function rpc(kv: KV, env: Env, token: string | null, method: string, args: unknown[]): Promise<Reply> {
   if (!METHODS.has(method) || !Array.isArray(args)) return { status: 400, body: { error: "Unknown action." } };
+  // Logins: lock an account for a few minutes after repeated wrong passwords.
+  if (method === "login" || method === "loginMember") {
+    const key = lockKey(method === "login" ? `login:${String(args[0] ?? "").trim()}` : `member:${String(args[1] ?? "")}`);
+    const mins = await lockedMinutes(kv, key);
+    if (mins > 0) return lockedReply(mins);
+    const r = await rpcCore(kv, env, token, method, args);
+    if (r.status === 400) await recordMiss(kv, key, ACCOUNT_MAX_MISSES);
+    else if (r.status === 200) await kv.delBlob(key);
+    return r;
+  }
+  // Testing page: the same idea for the testing password (admins skip it).
+  if (method === "testerChallenges" || method === "testerCheckFlag") {
+    const { db } = await load(kv, env);
+    const me = await verify(env, db, token);
+    if (me?.role !== "admin") {
+      const key = lockKey("tester");
+      const mins = await lockedMinutes(kv, key);
+      if (mins > 0) return lockedReply(mins);
+      const r = await rpcCore(kv, env, token, method, args);
+      if (r.status === 400 && (r.body as { error?: string }).error === "Wrong testing password.") await recordMiss(kv, key, TESTER_MAX_MISSES);
+      else if (r.status === 200) await kv.delBlob(key);
+      return r;
+    }
+  }
   // Sounds: the audio goes into its own database entry; only its details go into the main data.
   if (method === "uploadSound" || method === "deleteSound") {
     const { db } = await load(kv, env);
     const me = await verify(env, db, token);
     if (me?.role !== "admin") return { status: 403, body: { error: "Only admins can do that." } };
+    if (me.mustChangePassword) return { status: 403, body: { error: "Change your temporary password first." } };
     if (method === "uploadSound") {
       let meta;
       try { meta = soundMetaFor(String(args[0] ?? ""), String(args[1] ?? "")); }
@@ -176,6 +230,7 @@ export async function rpc(kv: KV, env: Env, token: string | null, method: string
     const { db, v } = await load(kv, env);
     const me = await verify(env, db, token);
     if (me?.role !== "admin") return { status: 403, body: { error: "Only admins can do that." } };
+    if (me.mustChangePassword) return { status: 403, body: { error: "Change your temporary password first." } };
     let meta;
     try { meta = fileMetaFor(String(args[0] ?? ""), String(args[1] ?? "")); }
     catch (e) { if (e instanceof BackendError) return { status: 400, body: { error: e.message } }; throw e; }
@@ -187,10 +242,12 @@ export async function rpc(kv: KV, env: Env, token: string | null, method: string
 }
 
 async function rpcCore(kv: KV, env: Env, token: string | null, method: string, args: unknown[]): Promise<Reply> {
-  for (let attempt = 0; attempt < 6; attempt++) {
+  for (let attempt = 0; attempt < 10; attempt++) {
     const { db, raw, v } = await load(kv, env);
     const me = await verify(env, db, token);
     if (ADMIN_ONLY.has(method) && me?.role !== "admin") return { status: 403, body: { error: "Only admins can do that." } };
+    // A temporary password must be changed before anything else works (the page enforces this too).
+    if (me?.mustChangePassword && !MUST_CHANGE_ALLOWED.has(method)) return { status: 403, body: { error: "Change your temporary password first." } };
 
     const mem = new MemStorage();
     mem.setItem(KEY, raw);

@@ -7,7 +7,7 @@ import { useBackend, useDB } from "../../data/store";
 import { CueEditor, usePreview } from "./Soundboard";
 
 export function blankChallenge(typeId: string): ChallengeInput {
-  return { typeId, theme: "plastics", title: "", description: "", points: 100, flag: "", caseSensitive: false, files: [], hints: [], maxAttempts: 0, hidden: false };
+  return { typeId, theme: "plastics", title: "", description: "", points: 100, flag: "", caseSensitive: false, files: [], hints: [], maxAttempts: 10, hidden: false };
 }
 
 /** The editable fields of one challenge. Used for wave slots, single challenges and edits. */

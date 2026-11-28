@@ -326,12 +326,12 @@ export class LocalBackend implements Backend {
     if (!value.trim()) return { ok: false, correct: false, message: "Type a flag first." };
     if (attemptsLeft(d, u.teamId, c) <= 0) return { ok: false, correct: false, message: "Your team has used all its attempts on this challenge. Ask an organiser if you think that's unfair." };
     const since = Date.now() - 60_000;
-    if (d.submissions.filter((s) => s.userId === u.id && Date.parse(s.at) > since).length >= d.settings.submissionsPerMinute) {
+    if (d.submissions.filter((s) => s.teamId === u.teamId && s.challengeId === c.id && Date.parse(s.at) > since).length >= d.settings.submissionsPerMinute) {
       return { ok: false, correct: false, message: "Too many attempts. Wait a minute and try again." };
     }
     const correct = sameHash(await hashFlag(value, c.flagSalt, c.caseSensitive), c.flagHash);
     // Wrong guesses are kept for the review log; correct flags are never stored as typed.
-    this.commit((x) => x.submissions.push({ id: randomId("s-"), userId: u.id, teamId: u.teamId!, challengeId: c.id, value: correct ? "(correct flag)" : value.trim().slice(0, 200), correct, at: new Date().toISOString() }));
+    this.commit((x) => x.submissions.push({ id: randomId("s-"), userId: u.id, teamId: u.teamId!, challengeId: c.id, value: correct ? "(correct flag)" : value.trim().slice(0, 100), correct, at: new Date().toISOString() }));
     return correct
       ? { ok: true, correct: true, points: c.points, message: `Deal! The sharks invested ${c.points} points in your team.` }
       : { ok: true, correct: false, message: "Not quite. That flag isn't right." };
@@ -601,7 +601,7 @@ export class LocalBackend implements Backend {
     this.requireAdmin();
     const pw = typeof password === "string" ? password : "";
     if (!pw) { this.commit((d) => { d.tester = null; }); return; }
-    if (pw.length < 6) throw new BackendError("Use at least 6 characters.");
+    if (pw.length < 12) throw new BackendError("Use at least 12 characters for the testing password.");
     if (pw.length > 200) throw new BackendError("That password is too long.");
     const salt = randomSalt();
     const hash = await hashPassword(pw, salt);

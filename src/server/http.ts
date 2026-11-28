@@ -27,7 +27,7 @@ export async function handle(kv: KV, env: Env, req: Req): Promise<Reply> {
     return { status: 404, body: { error: "Not found." } };
   } catch (e) {
     console.error(e);
-    return { status: 500, body: { error: (e as Error).message || "Server error." } };
+    return { status: 500, body: { error: "Server error. Try again in a moment." } };
   }
 }
 
@@ -45,7 +45,7 @@ export function nodeHandler(getKV: () => KV) {
         method: req.method ?? "GET", path: url.pathname, query: url.searchParams, auth: Array.isArray(auth) ? auth[0] : auth ?? null, body: req.body,
         tester: Array.isArray(tester) ? tester[0] : tester ?? null,
       });
-    } catch (e) { out = { status: 500, body: { error: (e as Error).message } }; }
+    } catch (e) { console.error(e); out = { status: 500, body: { error: "Server error. Try again in a moment." } }; }
     res.setHeader("X-Content-Type-Options", "nosniff");
     if (out.raw) {
       res.setHeader("Content-Type", out.raw.mime);

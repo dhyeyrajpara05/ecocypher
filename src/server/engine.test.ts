@@ -15,7 +15,10 @@ const state = async (token: string | null, v = 0, t = 0) => (await getState(kv, 
 async function adminToken() {
   const r = await call(null, "login", DEMO_ADMIN.username, DEMO_ADMIN.password);
   expect(r.status).toBe(200);
-  return r.body.token!;
+  // The demo admin starts on a temporary password, which the server makes you change before anything else.
+  const c = await call(r.body.token!, "changePassword", DEMO_ADMIN.password, "a-new-admin-password");
+  expect(c.status).toBe(200);
+  return c.body.token!;
 }
 async function playerToken() {
   const r = await call(null, "loginMember", "t4", "t4-u1", DEMO_PLAYER_PASSWORD);
@@ -167,4 +170,36 @@ describe("database settings", () => {
     expect(viaPair.token).toBe("tok");
     expect(() => kvFromEnv({ STORAGE_THING: "x" })).toThrow(/found: STORAGE_THING/);
   });
+});
+
+describe("login and testing-password limits", () => {
+  it("locks an account for a few minutes after 5 wrong passwords, even for the right one", async () => {
+    for (let i = 0; i < 5; i++) expect((await call(null, "login", DEMO_ADMIN.username, "wrong-guess")).status).toBe(400);
+    const locked = await call(null, "login", DEMO_ADMIN.username, DEMO_ADMIN.password);
+    expect(locked.status).toBe(429);
+    expect(locked.body.error).toMatch(/Too many wrong passwords/);
+    // other accounts are not affected
+    expect((await call(null, "loginMember", "t4", "t4-u1", DEMO_PLAYER_PASSWORD)).status).toBe(200);
+  }, 60_000);
+
+  it("a correct login resets the miss count", async () => {
+    for (let i = 0; i < 4; i++) await call(null, "login", DEMO_ADMIN.username, "wrong-guess");
+    expect((await call(null, "login", DEMO_ADMIN.username, DEMO_ADMIN.password)).status).toBe(200);
+    for (let i = 0; i < 4; i++) expect((await call(null, "login", DEMO_ADMIN.username, "wrong-guess")).status).toBe(400);
+  }, 60_000);
+
+  it("refuses everything but a password change while the password is temporary", async () => {
+    const r = await call(null, "login", DEMO_ADMIN.username, DEMO_ADMIN.password);
+    const t = r.body.token!;
+    expect((await call(t, "startTimer")).status).toBe(403);
+    expect((await call(t, "changePassword", DEMO_ADMIN.password, "a-new-admin-password")).status).toBe(200);
+  }, 60_000);
+
+  it("rejects a testing password shorter than 12 characters and locks out wrong guesses", async () => {
+    const a = await adminToken();
+    expect((await call(a, "setTesterPassword", "short")).status).toBe(400);
+    expect((await call(a, "setTesterPassword", "a-long-testing-password")).status).toBe(200);
+    for (let i = 0; i < 10; i++) expect((await call(null, "testerChallenges", "nope-nope-nope")).status).toBe(400);
+    expect((await call(null, "testerChallenges", "a-long-testing-password")).status).toBe(429);
+  }, 60_000);
 });
