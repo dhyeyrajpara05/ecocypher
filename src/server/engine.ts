@@ -21,7 +21,7 @@ const METHODS = new Set([
   "createTeam", "importTeams", "renameTeam", "deleteTeam", "addMember", "resetPassword", "deleteUser",
   "postNotification", "deleteNotification", "exportJSON", "importJSON", "startFresh", "loadDemo",
   "updateCue", "uploadSound", "deleteSound",
-  "bulkChallenges", "uploadFile", "testerChallenges", "testerCheckFlag", "setTesterPassword",
+  "bulkChallenges", "uploadFile", "updateFinals", "publishFinals", "testerChallenges", "testerCheckFlag", "setTesterPassword",
 ]);
 const ADMIN_ONLY = new Set(["loadDemo"]);
 const TOKEN_HOURS = 8;

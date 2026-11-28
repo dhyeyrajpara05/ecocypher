@@ -6,7 +6,7 @@
  */
 import { BackendError, isPrivateFile, parseChallengeText, triggerDownload, type Backend, type ChallengeInput, type Credential, type ParsedFile } from "./backend";
 import { BUILTIN_SOUNDS } from "./sounds";
-import type { BulkAction, Challenge, ChallengeFile, ChallengeType, Cue, CueKey, DB, Hint, NoticeLevel, Settings, SoundMeta, SubmitResult, TesterChallenge, User } from "./types";
+import type { BulkAction, Challenge, ChallengeFile, Finals, ChallengeType, Cue, CueKey, DB, Hint, NoticeLevel, Settings, SoundMeta, SubmitResult, TesterChallenge, User } from "./types";
 
 const TOKEN = "ecocypher:token";
 const POLL_MS = 3000;
@@ -123,6 +123,8 @@ export class RemoteBackend implements Backend {
   testerChallenges(password: string) { return this.call<TesterChallenge[]>("testerChallenges", password); }
   testerCheckFlag(password: string, challengeId: string, value: string) { return this.call<{ correct: boolean }>("testerCheckFlag", password, challengeId, value); }
   setTesterPassword(password: string) { return this.call<void>("setTesterPassword", password); }
+  updateFinals(patch: Partial<Pick<Finals, "ctfWeight" | "pitchMax" | "judges" | "scores">>) { return this.call<void>("updateFinals", patch); }
+  publishFinals(publish: boolean) { return this.call<void>("publishFinals", publish); }
   parseChallengeFile(text: string): ParsedFile { return parseChallengeText(text, this.state.types); }
 
   createTeam(name: string, members: string[]) { return this.call<Credential[]>("createTeam", name, members); }

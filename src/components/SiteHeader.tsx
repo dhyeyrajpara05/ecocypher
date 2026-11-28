@@ -41,6 +41,11 @@ export function SiteHeader({ dark = false }: { dark?: boolean }) {
   const links = (
     <>
       {user?.role === "player" && <NavLink to="/play" className={link}>Challenges</NavLink>}
+      {(db.finals?.published || user?.role === "admin") && (
+        <NavLink to="/results" className={(a) => `${link(a)} ${db.finals?.published && !a.isActive ? (dark ? "text-brass" : "text-brass-600") : ""}`}>
+          <span className="inline-flex items-center gap-1.5">{db.finals?.published && <span aria-hidden="true">🏆</span>}Results</span>
+        </NavLink>
+      )}
       <NavLink to="/scoreboard" className={link}>Scoreboard</NavLink>
       <NavLink to="/notifications" className={link}>
         <span className="inline-flex items-center gap-1.5">Notifications

@@ -71,6 +71,10 @@ export function publicView(db: DB, me: User | null, now = new Date()): DB {
   v.hintUnlocks = db.hintUnlocks
     .filter((h) => !archived.has(h.challengeId) && othersVisible(h.teamId, h.at))
     .map((h) => (team !== null && h.teamId === team ? { ...h } : ({ teamId: h.teamId, challengeId: h.challengeId, index: h.index, cost: h.cost, at: h.at } as typeof h)));
+  // Final results: nothing (not even judges or draft scores) until the admin publishes; then only the frozen standings.
+  if (db.finals?.published && db.finals.snapshot) {
+    v.finals = { ctfWeight: db.finals.ctfWeight, pitchMax: db.finals.pitchMax, judges: [], scores: {}, published: true, publishedAt: db.finals.publishedAt, snapshot: db.finals.snapshot };
+  } else delete v.finals;
   // Waves are only labels; hide waves that have nothing live yet so their existence doesn't leak.
   const liveWaves = new Set(live.map((c) => c.waveId).filter(Boolean));
   v.waves = db.waves.filter((w) => liveWaves.has(w.id));

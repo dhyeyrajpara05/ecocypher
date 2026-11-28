@@ -8,9 +8,9 @@
  */
 import { hashFlag, hashPassword, randomId, randomSalt, sameHash, tempPassword } from "./crypto";
 import { demoDB, emptyDB, makeUser } from "./seed";
-import { attemptsLeft, eventStatus, releaseStatus, solves, unlockedHints, WAVE_SIZE } from "./scoring";
+import { attemptsLeft, defaultFinals, eventStatus, finalStandings, releaseStatus, solves, unlockedHints, WAVE_SIZE } from "./scoring";
 import { BUILTIN_SOUNDS, CUE_KEYS, defaultSoundboard, MAX_SOUND_BYTES } from "./sounds";
-import type { BulkAction, Challenge, ChallengeFile, ChallengeType, Cue, CueKey, DB, Hint, NoticeLevel, Settings, SoundMeta, SubmitResult, Team, TesterChallenge, ThemeKey, User } from "./types";
+import type { BulkAction, Challenge, ChallengeFile, Finals, ChallengeType, Cue, CueKey, DB, Hint, NoticeLevel, Settings, SoundMeta, SubmitResult, Team, TesterChallenge, ThemeKey, User } from "./types";
 import { plainCipher, type Cipher } from "./vault";
 
 export interface Credential { team: string; displayName: string; username: string; password: string }
@@ -60,6 +60,10 @@ export interface Backend {
   testerCheckFlag(password: string, challengeId: string, value: string): Promise<{ correct: boolean }>;
   /** Sets the testing-page password. "" = Admin only. */
   setTesterPassword(password: string): Promise<void>;
+  /** Final results: weighting, judges and pitch scores. Players see nothing until publishFinals(true). */
+  updateFinals(patch: Partial<Pick<Finals, "ctfWeight" | "pitchMax" | "judges" | "scores">>): Promise<void>;
+  /** Publishes (freezes and shows) or hides the final results page. */
+  publishFinals(publish: boolean): Promise<void>;
   parseChallengeFile(text: string): ParsedFile;
   // admin: people
   createTeam(name: string, members: string[]): Promise<Credential[]>;
@@ -608,6 +612,76 @@ export class LocalBackend implements Backend {
     this.commit((d) => { d.tester = { passwordHash: hash, passwordSalt: salt }; });
   }
 
+  async updateFinals(patch: Partial<Pick<Finals, "ctfWeight" | "pitchMax" | "judges" | "scores">>) {
+    this.requireAdmin();
+    const f: Finals = structuredClone(this.state.finals ?? defaultFinals());
+    if (patch.ctfWeight !== undefined) {
+      const w = Math.round(Number(patch.ctfWeight));
+      if (!Number.isFinite(w) || w < 0 || w > 100) throw new BackendError("The CTF share must be between 0 and 100%.");
+      f.ctfWeight = w;
+    }
+    if (patch.pitchMax !== undefined) {
+      const m = Number(patch.pitchMax);
+      if (!Number.isFinite(m) || m < 1 || m > 1000) throw new BackendError("The top pitch score must be between 1 and 1000.");
+      f.pitchMax = m;
+    }
+    if (patch.judges !== undefined) {
+      if (!Array.isArray(patch.judges) || patch.judges.length > 20) throw new BackendError("Add up to 20 judges.");
+      const seen = new Set<string>();
+      f.judges = patch.judges.map((j) => {
+        const name = String(j?.name ?? "").trim().slice(0, 60);
+        if (!name) throw new BackendError("Every judge needs a name.");
+        let id = String(j?.id ?? "");
+        if (!/^j-[a-z0-9]{4,20}$/.test(id) || seen.has(id)) id = randomId("j-");
+        seen.add(id);
+        return { id, name };
+      });
+    }
+    if (patch.scores !== undefined) {
+      if (!patch.scores || typeof patch.scores !== "object") throw new BackendError("Those scores couldn't be read.");
+      f.scores = {};
+      for (const [teamId, byJudge] of Object.entries(patch.scores)) {
+        if (!this.state.teams.some((t) => t.id === teamId) || !byJudge || typeof byJudge !== "object") continue;
+        for (const [judgeId, raw] of Object.entries(byJudge)) {
+          if (raw === null || raw === undefined || (raw as unknown) === "") continue;
+          const v = Number(raw);
+          if (!Number.isFinite(v)) continue;
+          (f.scores[teamId] ??= {})[judgeId] = v;
+        }
+      }
+    }
+    // Scores must fit the current judges and scale, whichever of them just changed.
+    for (const [teamId, byJudge] of Object.entries(f.scores)) {
+      for (const [judgeId, v] of Object.entries(byJudge)) {
+        if (!f.judges.some((j) => j.id === judgeId)) { delete byJudge[judgeId]; continue; }
+        if (v < 0 || v > f.pitchMax) {
+          const team = this.state.teams.find((t) => t.id === teamId)?.name ?? "a team";
+          throw new BackendError(`Pitch scores must be between 0 and ${f.pitchMax}. Check ${team}.`);
+        }
+      }
+      if (!Object.keys(byJudge).length) delete f.scores[teamId];
+    }
+    this.commit((d) => { d.finals = f; });
+  }
+  async publishFinals(publish: boolean) {
+    this.requireAdmin();
+    const f: Finals = structuredClone(this.state.finals ?? defaultFinals());
+    if (publish) {
+      if (!this.state.teams.length) throw new BackendError("There are no teams to rank yet.");
+      f.snapshot = finalStandings(this.state, f);
+      const first = !f.published;
+      f.published = true;
+      f.publishedAt = new Date().toISOString();
+      this.commit((d) => {
+        d.finals = f;
+        if (first) d.notifications.unshift({ id: randomId("n-"), title: "The final results are out!", body: "CTF and Shark Tank scores are in. Open Results to see who takes the deal.", level: "important", at: new Date().toISOString() });
+      });
+    } else {
+      f.published = false;
+      this.commit((d) => { d.finals = f; });
+    }
+  }
+
   /**
    * Reads challenges from CSV (header: title,type,theme,points,flag,description,hint,hint_cost,attempts,files) or a JSON array.
    * `type` is a type name or id; `theme` one of plastics, energy, water, ewaste, food, climate; `files` is "name|url;name|url".
@@ -727,6 +801,8 @@ export class LocalBackend implements Backend {
     d.types = old.types;
     d.soundboard = old.soundboard;
     d.tester = old.tester ?? null;
+    // Keep the judging panel and weighting; scores and published results belong to the old event.
+    if (old.finals) d.finals = { ...old.finals, scores: {}, published: false, publishedAt: null, snapshot: null };
     this.state = d; this.persist();
     this.storage.setItem(SESSION, me.id);
     this.emit();

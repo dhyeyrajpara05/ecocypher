@@ -1,5 +1,5 @@
 // Pure scoring and status logic. No storage, so it can be unit-tested and reused on a server later.
-import type { Challenge, DB, ReleaseStatus, ScoreRow, Submission } from "./types";
+import type { Challenge, DB, FinalRow, Finals, ReleaseStatus, ScoreRow, Submission } from "./types";
 
 export function releaseStatus(c: Challenge, now: Date = new Date()): ReleaseStatus {
   if (c.archivedAt) return "archived";
@@ -118,3 +118,40 @@ export function solveCounts(db: DB): Map<string, number> {
 }
 
 export const WAVE_SIZE = 5;
+
+export function defaultFinals(): Finals {
+  return { ctfWeight: 50, pitchMax: 10, judges: [], scores: {}, published: false, publishedAt: null, snapshot: null };
+}
+
+const round1 = (n: number) => Math.round(n * 10) / 10;
+
+/**
+ * Final standings = CTF + Shark Tank pitch.
+ *  - CTF: the team's points scaled so the top CTF team gets 100 (0 if nobody scored).
+ *  - Pitch: the average of the judges who scored the team, scaled to 100 (pitchMax = 100).
+ *  - Combined = ctfWeight% of the CTF part + the rest of the pitch part, out of 100.
+ *  - Ties: higher combined, then higher CTF points, then higher pitch, then team name.
+ */
+export function finalStandings(db: DB, f: Finals = db.finals ?? defaultFinals()): FinalRow[] {
+  const ctf = scoreboard(db);
+  const top = Math.max(0, ...ctf.map((r) => r.score));
+  const w = Math.min(100, Math.max(0, f.ctfWeight)) / 100;
+  const rows = ctf.map((r) => {
+    const given = f.judges.map((j) => f.scores[r.teamId]?.[j.id]).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+    const pitchAvg = given.length ? given.reduce((a, b) => a + b, 0) / given.length : null;
+    const ctfScaled = top > 0 ? Math.max(0, r.score) / top * 100 : 0;
+    const pitchScaled = pitchAvg === null || f.pitchMax <= 0 ? 0 : Math.min(100, pitchAvg / f.pitchMax * 100);
+    return {
+      rank: 0, teamId: r.teamId, teamName: r.teamName, members: r.members.map((m) => m.name),
+      ctfScore: r.score, ctfScaled: round1(ctfScaled), pitchAvg: pitchAvg === null ? null : round1(pitchAvg), pitchScaled: round1(pitchScaled),
+      combined: round1(w * ctfScaled + (1 - w) * pitchScaled),
+    };
+  });
+  rows.sort((a, b) => b.combined - a.combined || b.ctfScore - a.ctfScore || (b.pitchAvg ?? -1) - (a.pitchAvg ?? -1) || a.teamName.localeCompare(b.teamName));
+  // Teams with exactly the same combined, CTF and pitch share a rank.
+  rows.forEach((r, i) => {
+    const p = rows[i - 1];
+    r.rank = p && p.combined === r.combined && p.ctfScore === r.ctfScore && p.pitchAvg === r.pitchAvg ? p.rank : i + 1;
+  });
+  return rows;
+}

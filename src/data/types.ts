@@ -147,6 +147,38 @@ export interface DB {
   tester?: { passwordHash: string; passwordSalt: string } | null;
   /** Sent to the admin instead of `tester`: whether a testing password is set. */
   testerEnabled?: boolean;
+  /** Final results (CTF + Shark Tank pitch). Players only receive it once the admin publishes it. */
+  finals?: Finals;
+}
+
+export interface Judge { id: string; name: string }
+/** One team's line on the final results page. */
+export interface FinalRow {
+  rank: number;
+  teamId: string;
+  teamName: string;
+  members: string[];
+  /** CTF points (after hint costs) and the same scaled so the top CTF team = 100. */
+  ctfScore: number;
+  ctfScaled: number;
+  /** Average of the judges' pitch scores (out of pitchMax), or null if no judge scored the team. */
+  pitchAvg: number | null;
+  pitchScaled: number;
+  /** Weighted total out of 100. */
+  combined: number;
+}
+export interface Finals {
+  /** Share of the final score that comes from the CTF, 0–100. The rest comes from the pitch. */
+  ctfWeight: number;
+  /** Highest score a judge can give a pitch. */
+  pitchMax: number;
+  judges: Judge[];
+  /** scores[teamId][judgeId] = that judge's pitch score. */
+  scores: Record<string, Record<string, number>>;
+  published: boolean;
+  publishedAt: string | null;
+  /** The standings frozen at the moment of publishing: what players see. */
+  snapshot: FinalRow[] | null;
 }
 
 export type ReleaseStatus = "draft" | "scheduled" | "live" | "archived";

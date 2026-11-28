@@ -313,7 +313,86 @@ function attemptsLeft(db, teamId, c) {
 function unlockedHints(db, teamId, challengeId) {
   return new Set(db.hintUnlocks.filter((h) => h.teamId === teamId && h.challengeId === challengeId).map((h) => h.index));
 }
+function scoreboard(db, opts = {}) {
+  const pts = new Map(db.challenges.filter((c) => !c.archivedAt).map((c) => [c.id, c.points]));
+  const archived = new Set(db.challenges.filter((c) => c.archivedAt).map((c) => c.id));
+  const userName = new Map(db.users.map((u) => [u.id, u.displayName]));
+  const rows = /* @__PURE__ */ new Map();
+  for (const t of db.teams) {
+    const members = db.users.filter((u) => u.teamId === t.id && u.role === "player").map((u) => ({ userId: u.id, name: u.displayName, points: 0, solves: 0 }));
+    rows.set(t.id, { rank: 0, teamId: t.id, teamName: t.name, score: 0, solves: 0, hintCost: 0, lastSolveAt: null, members, history: [] });
+  }
+  const cutoff = opts.until ? opts.until.getTime() : Infinity;
+  const events = [
+    ...solves(db, opts.until).map((s) => ({ kind: "solve", at: s.at, teamId: s.teamId, userId: s.userId, delta: pts.get(s.challengeId) })),
+    ...(db.hintUnlocks ?? []).filter((h) => Date.parse(h.at) <= cutoff && h.cost > 0 && !archived.has(h.challengeId)).map((h) => ({ kind: "hint", at: h.at, teamId: h.teamId, userId: h.userId, delta: -h.cost }))
+  ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  for (const e of events) {
+    const row = rows.get(e.teamId);
+    if (!row || e.delta === void 0) continue;
+    row.score += e.delta;
+    row.lastSolveAt = e.at;
+    row.history.push({ at: e.at, score: row.score });
+    if (e.kind === "hint") {
+      row.hintCost -= e.delta;
+      continue;
+    }
+    row.solves += 1;
+    let m = row.members.find((x) => x.userId === e.userId);
+    if (!m) {
+      m = { userId: e.userId, name: userName.get(e.userId) ?? "Former member", points: 0, solves: 0 };
+      row.members.push(m);
+    }
+    m.points += e.delta;
+    m.solves += 1;
+  }
+  const list = [...rows.values()].sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    if (!a.solves !== !b.solves) return a.solves ? -1 : 1;
+    if (a.lastSolveAt && b.lastSolveAt) return Date.parse(a.lastSolveAt) - Date.parse(b.lastSolveAt);
+    if (a.lastSolveAt) return -1;
+    if (b.lastSolveAt) return 1;
+    return a.teamName.localeCompare(b.teamName);
+  });
+  list.forEach((r, i) => {
+    r.rank = i + 1;
+    r.members.sort((a, b) => b.points - a.points);
+  });
+  return list;
+}
 var WAVE_SIZE = 5;
+function defaultFinals() {
+  return { ctfWeight: 50, pitchMax: 10, judges: [], scores: {}, published: false, publishedAt: null, snapshot: null };
+}
+var round1 = (n) => Math.round(n * 10) / 10;
+function finalStandings(db, f = db.finals ?? defaultFinals()) {
+  const ctf = scoreboard(db);
+  const top = Math.max(0, ...ctf.map((r) => r.score));
+  const w = Math.min(100, Math.max(0, f.ctfWeight)) / 100;
+  const rows = ctf.map((r) => {
+    const given = f.judges.map((j) => f.scores[r.teamId]?.[j.id]).filter((v) => typeof v === "number" && Number.isFinite(v));
+    const pitchAvg = given.length ? given.reduce((a, b) => a + b, 0) / given.length : null;
+    const ctfScaled = top > 0 ? Math.max(0, r.score) / top * 100 : 0;
+    const pitchScaled = pitchAvg === null || f.pitchMax <= 0 ? 0 : Math.min(100, pitchAvg / f.pitchMax * 100);
+    return {
+      rank: 0,
+      teamId: r.teamId,
+      teamName: r.teamName,
+      members: r.members.map((m) => m.name),
+      ctfScore: r.score,
+      ctfScaled: round1(ctfScaled),
+      pitchAvg: pitchAvg === null ? null : round1(pitchAvg),
+      pitchScaled: round1(pitchScaled),
+      combined: round1(w * ctfScaled + (1 - w) * pitchScaled)
+    };
+  });
+  rows.sort((a, b) => b.combined - a.combined || b.ctfScore - a.ctfScore || (b.pitchAvg ?? -1) - (a.pitchAvg ?? -1) || a.teamName.localeCompare(b.teamName));
+  rows.forEach((r, i) => {
+    const p = rows[i - 1];
+    r.rank = p && p.combined === r.combined && p.ctfScore === r.ctfScore && p.pitchAvg === r.pitchAvg ? p.rank : i + 1;
+  });
+  return rows;
+}
 
 // src/data/vault.ts
 var plainCipher = { seal: async (s) => s, open: async (s) => s };
@@ -951,6 +1030,81 @@ var LocalBackend = class {
       d.tester = { passwordHash: hash, passwordSalt: salt };
     });
   }
+  async updateFinals(patch) {
+    this.requireAdmin();
+    const f = structuredClone(this.state.finals ?? defaultFinals());
+    if (patch.ctfWeight !== void 0) {
+      const w = Math.round(Number(patch.ctfWeight));
+      if (!Number.isFinite(w) || w < 0 || w > 100) throw new BackendError("The CTF share must be between 0 and 100%.");
+      f.ctfWeight = w;
+    }
+    if (patch.pitchMax !== void 0) {
+      const m = Number(patch.pitchMax);
+      if (!Number.isFinite(m) || m < 1 || m > 1e3) throw new BackendError("The top pitch score must be between 1 and 1000.");
+      f.pitchMax = m;
+    }
+    if (patch.judges !== void 0) {
+      if (!Array.isArray(patch.judges) || patch.judges.length > 20) throw new BackendError("Add up to 20 judges.");
+      const seen = /* @__PURE__ */ new Set();
+      f.judges = patch.judges.map((j) => {
+        const name = String(j?.name ?? "").trim().slice(0, 60);
+        if (!name) throw new BackendError("Every judge needs a name.");
+        let id = String(j?.id ?? "");
+        if (!/^j-[a-z0-9]{4,20}$/.test(id) || seen.has(id)) id = randomId("j-");
+        seen.add(id);
+        return { id, name };
+      });
+    }
+    if (patch.scores !== void 0) {
+      if (!patch.scores || typeof patch.scores !== "object") throw new BackendError("Those scores couldn't be read.");
+      f.scores = {};
+      for (const [teamId, byJudge] of Object.entries(patch.scores)) {
+        if (!this.state.teams.some((t) => t.id === teamId) || !byJudge || typeof byJudge !== "object") continue;
+        for (const [judgeId, raw] of Object.entries(byJudge)) {
+          if (raw === null || raw === void 0 || raw === "") continue;
+          const v = Number(raw);
+          if (!Number.isFinite(v)) continue;
+          (f.scores[teamId] ??= {})[judgeId] = v;
+        }
+      }
+    }
+    for (const [teamId, byJudge] of Object.entries(f.scores)) {
+      for (const [judgeId, v] of Object.entries(byJudge)) {
+        if (!f.judges.some((j) => j.id === judgeId)) {
+          delete byJudge[judgeId];
+          continue;
+        }
+        if (v < 0 || v > f.pitchMax) {
+          const team = this.state.teams.find((t) => t.id === teamId)?.name ?? "a team";
+          throw new BackendError(`Pitch scores must be between 0 and ${f.pitchMax}. Check ${team}.`);
+        }
+      }
+      if (!Object.keys(byJudge).length) delete f.scores[teamId];
+    }
+    this.commit((d) => {
+      d.finals = f;
+    });
+  }
+  async publishFinals(publish) {
+    this.requireAdmin();
+    const f = structuredClone(this.state.finals ?? defaultFinals());
+    if (publish) {
+      if (!this.state.teams.length) throw new BackendError("There are no teams to rank yet.");
+      f.snapshot = finalStandings(this.state, f);
+      const first = !f.published;
+      f.published = true;
+      f.publishedAt = (/* @__PURE__ */ new Date()).toISOString();
+      this.commit((d) => {
+        d.finals = f;
+        if (first) d.notifications.unshift({ id: randomId("n-"), title: "The final results are out!", body: "CTF and Shark Tank scores are in. Open Results to see who takes the deal.", level: "important", at: (/* @__PURE__ */ new Date()).toISOString() });
+      });
+    } else {
+      f.published = false;
+      this.commit((d) => {
+        d.finals = f;
+      });
+    }
+  }
   /**
    * Reads challenges from CSV (header: title,type,theme,points,flag,description,hint,hint_cost,attempts,files) or a JSON array.
    * `type` is a type name or id; `theme` one of plastics, energy, water, ewaste, food, climate; `files` is "name|url;name|url".
@@ -1095,6 +1249,7 @@ var LocalBackend = class {
     d.types = old.types;
     d.soundboard = old.soundboard;
     d.tester = old.tester ?? null;
+    if (old.finals) d.finals = { ...old.finals, scores: {}, published: false, publishedAt: null, snapshot: null };
     this.state = d;
     this.persist();
     this.storage.setItem(SESSION, me.id);
@@ -1157,6 +1312,9 @@ function publicView(db, me, now = /* @__PURE__ */ new Date()) {
   v.submissions = db.submissions.filter((s) => liveIds.has(s.challengeId) && othersVisible(s.teamId, s.at) && (s.correct || team !== null && s.teamId === team)).map((s) => team !== null && s.teamId === team ? { ...s } : publicSolve(s));
   const archived = new Set(db.challenges.filter((c) => c.archivedAt).map((c) => c.id));
   v.hintUnlocks = db.hintUnlocks.filter((h) => !archived.has(h.challengeId) && othersVisible(h.teamId, h.at)).map((h) => team !== null && h.teamId === team ? { ...h } : { teamId: h.teamId, challengeId: h.challengeId, index: h.index, cost: h.cost, at: h.at });
+  if (db.finals?.published && db.finals.snapshot) {
+    v.finals = { ctfWeight: db.finals.ctfWeight, pitchMax: db.finals.pitchMax, judges: [], scores: {}, published: true, publishedAt: db.finals.publishedAt, snapshot: db.finals.snapshot };
+  } else delete v.finals;
   const liveWaves = new Set(live.map((c) => c.waveId).filter(Boolean));
   v.waves = db.waves.filter((w) => liveWaves.has(w.id));
   return v;
@@ -1205,6 +1363,8 @@ var METHODS = /* @__PURE__ */ new Set([
   "deleteSound",
   "bulkChallenges",
   "uploadFile",
+  "updateFinals",
+  "publishFinals",
   "testerChallenges",
   "testerCheckFlag",
   "setTesterPassword"

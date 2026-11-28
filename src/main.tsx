@@ -13,6 +13,7 @@ import Admin from "./pages/admin/Admin";
 import Notifications from "./pages/Notifications";
 import Faq from "./pages/Faq";
 import AllChallengeView from "./pages/AllChallengeView";
+import Results from "./pages/Results";
 
 function Guard({ role, children }: { role: "player" | "admin"; children: React.ReactNode }) {
   const user = useUser();
@@ -33,6 +34,7 @@ function App() {
       <Route path="/notifications" element={<Notifications />} />
       <Route path="/faq" element={<Faq />} />
       <Route path="/all-challenge-view" element={<AllChallengeView />} />
+      <Route path="/results" element={<Results />} />
       <Route path="/play" element={<Guard role="player"><Play /></Guard>} />
       <Route path="/admin/*" element={<Guard role="admin"><Admin /></Guard>} />
       <Route path="*" element={<Navigate to="/" replace />} />

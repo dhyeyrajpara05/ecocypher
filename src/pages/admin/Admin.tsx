@@ -8,6 +8,7 @@ import Library from "./Library";
 import Teams from "./Teams";
 import Soundboard from "./Soundboard";
 import Archive from "./Archive";
+import Finals from "./Finals";
 import { NotificationsAdmin, Settings, Submissions } from "./Misc";
 
 const ICONS: Record<string, JSX.Element> = {
@@ -15,6 +16,7 @@ const ICONS: Record<string, JSX.Element> = {
   post: <path d="M12 5v14M5 12h14" />,
   lib: <path d="M4 6h16M4 12h16M4 18h10" />,
   archive: <path d="M3 5h18v4H3zM5 9v10h14V9M10 13h4" />,
+  trophy: <path d="M8 4h8v5a4 4 0 0 1-8 0zM8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M8 20h8M10 17h4" />,
   teams: <><circle cx="9" cy="8" r="3" /><path d="M3 20c0-3 3-5 6-5s6 2 6 5M16 11a3 3 0 1 0 0-6M21 20c0-2-1.5-4-4-4.6" /></>,
   bell: <path d="M6 16V11a6 6 0 1 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0" />,
   subs: <path d="M5 4h14v16H5zM9 9h6M9 13h6M9 17h3" />,
@@ -31,6 +33,7 @@ const NAV: [string, string, string][] = [
   ["notifications", "Notifications", "bell"],
   ["soundboard", "Soundboard", "sound"],
   ["submissions", "Submissions", "subs"],
+  ["finals", "Final results", "trophy"],
   ["settings", "Settings", "gear"],
 ];
 
@@ -81,6 +84,7 @@ export default function Admin() {
             <Route path="post" element={<Post />} />
             <Route path="library" element={<Library />} />
             <Route path="archive" element={<Archive />} />
+            <Route path="finals" element={<Finals />} />
             <Route path="teams" element={<Teams />} />
             <Route path="notifications" element={<NotificationsAdmin />} />
             <Route path="soundboard" element={<Soundboard />} />
